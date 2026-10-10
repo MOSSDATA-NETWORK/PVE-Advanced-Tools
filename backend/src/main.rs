@@ -136,9 +136,14 @@ async fn run_migrations(pool: &sqlx::SqlitePool) -> anyhow::Result<()> {
     if let Some(sql) = tok_idx {
         if sql.contains("!= 'revoked'") {
             sqlx::query("DROP INDEX idx_qos_tokens_active").execute(pool).await?;
-            sqlx::query("CREATE UNIQUE INDEX idx_qos_tokens_active ON qos_tokens(host_id, purpose) WHERE status = 'active'")
-                .execute(pool).await?;
         }
+    }
+    // 无论旧索引是否存在都确保新索引就位（IF NOT EXISTS 幂等）
+    if sqlx::query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='qos_tokens'")
+        .fetch_optional(pool).await?.is_some()
+    {
+        sqlx::query("CREATE UNIQUE INDEX IF NOT EXISTS idx_qos_tokens_active ON qos_tokens(host_id, purpose) WHERE status = 'active'")
+            .execute(pool).await?;
     }
 
     // 结构性补丁（幂等）：results 去重 + (host_id, vmid) 唯一索引（并发扫描防重复行）
