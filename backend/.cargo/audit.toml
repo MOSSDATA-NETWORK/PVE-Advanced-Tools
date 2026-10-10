@@ -1,0 +1,4 @@
+[advisories]
+# rsa (RUSTSEC-2023-0071 Marvin，无修复版本)：仅经 sqlx-mysql 进入 Cargo.lock，
+# 本项目 sqlx 只启用 sqlite feature，rsa/chacha20 不在编译图中（cargo tree -i rsa 为空），无实际暴露面。
+ignore = ["RUSTSEC-2023-0071"]
