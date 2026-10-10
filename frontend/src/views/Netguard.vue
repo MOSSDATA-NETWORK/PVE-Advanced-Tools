@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { netguardApi, hostsApi, jobsApi } from '../api'
 
 const ports = ref<any[]>([])
@@ -17,10 +17,8 @@ const newDomain = ref('')
 const importText = ref('')
 const showImport = ref(false)
 const route = useRoute()
-const router = useRouter()
 const tab = ref<string>((route.query.tab as string) || 'overview')
 watch(() => route.query.tab, t => { if (t) tab.value = t as string })
-function setTab(t: string) { router.replace({ query: { tab: t } }) }
 const logEnabled = ref(false)
 const logHost = ref<number | null>(null)
 const logOutput = ref('')
@@ -165,13 +163,6 @@ async function fetchLogs() {
     </div>
 
     <!-- 页签 -->
-    <div style="display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;">
-      <button v-for="t in ['overview', 'scope', 'ports', 'domains', 'logs']" :key="t"
-        class="btn" :class="tab === t ? 'btn-primary' : 'btn-secondary'" @click="setTab(t)">
-        {{ { overview: '管控总览', scope: '生效范围', ports: '端口封堵', domains: '域名拦截', logs: '拦截日志' }[t] }}
-      </button>
-    </div>
-
     <!-- 管控总览 -->
     <div class="card" v-if="tab === 'overview'" id="overview" style="margin-bottom: 16px;">
       <h3 style="margin: 0 0 12px; font-size: 16px;">管控总览（各节点组件状态）</h3>

@@ -1,13 +1,11 @@
 <script setup lang="ts">
 import { ref, onMounted, computed , watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { arpApi, hostsApi, arpStatsApi, jobsApi } from '../api'
 
 const route = useRoute()
-const router = useRouter()
 const tab = ref<string>((route.query.tab as string) || 'mode')
 watch(() => route.query.tab, t => { if (t) tab.value = t as string })
-function setTab(t: string) { router.replace({ query: { tab: t } }) }
 
 const hosts = ref<any[]>([])
 const modes = ref<Record<number, string>>({})
@@ -152,13 +150,6 @@ async function loadStats() {
     <div v-if="notice" style="margin-bottom: 16px; padding: 12px 16px; border-radius: 12px;"
       :style="{ background: notice.ok ? 'rgba(52,199,89,0.08)' : 'rgba(255,59,48,0.08)', border: '1px solid ' + (notice.ok ? 'rgba(52,199,89,0.2)' : 'rgba(255,59,48,0.2)') }">
       <span style="font-size: 14px;">{{ notice.text }}</span>
-    </div>
-
-    <div style="display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;">
-      <button v-for="t in ['mode', 'stats']" :key="t"
-        class="btn" :class="tab === t ? 'btn-primary' : 'btn-secondary'" @click="setTab(t)">
-        {{ { mode: '运行模式与白名单', stats: '效果统计' }[t] }}
-      </button>
     </div>
 
     <div class="card" v-if="tab === 'mode'" id="mode">

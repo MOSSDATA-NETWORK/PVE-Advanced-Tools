@@ -1,15 +1,13 @@
 <script setup lang="ts">
 import {ref, onMounted, computed, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { hostsApi } from '../api'
 import { formatTime } from '../time'
 import axios from 'axios'
 
 const route = useRoute()
-const router = useRouter()
 const tab = ref<string>((route.query.tab as string) || 'inspect')
 watch(() => route.query.tab, t => { if (t) tab.value = t as string })
-function setTab(t: string) { router.replace({ query: { tab: t } }) }
 
 const rules = ref<any[]>([])
 const history = ref<any[]>([])
@@ -112,13 +110,6 @@ function changePage(p: number) {
 
     <!-- 巡检设置 -->
 
-        <div style="display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;">
-          <button v-for="t in ['inspect', 'rules', 'history']" :key="t"
-            class="btn" :class="tab === t ? 'btn-primary' : 'btn-secondary'" @click="setTab(t)">
-            {{ { inspect: '巡检计划', rules: '告警规则', history: '告警历史' }[t] }}
-          </button>
-        </div>
-    
     <div class="card" v-if="tab === 'inspect'" id="inspect" style="margin-bottom: 16px;">
       <h3 style="margin: 0 0 12px; font-size: 16px;">定时巡检（检测组件存活 + 资源水位）</h3>
       <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">

@@ -1,11 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { qosApi, hostsApi } from '../api'
 
 const route = useRoute()
-const router = useRouter()
-function setTab(t: string) { router.replace({ query: { tab: t } }) }
 const tab = ref<string>(
   ['policies', 'templates', 'events', 'nodes', 'access'].includes(route.query.tab as string)
     ? (route.query.tab as string) : 'nodes')
@@ -134,14 +132,6 @@ const purposeLabel: Record<string, string> = { snapshot: '快照', report: '上�
     </div>
 
     <div v-if="notice" :class="notice.ok ? 'notice-ok' : 'notice-err'" style="margin-bottom: 12px;">{{ notice.text }}</div>
-
-    <div style="display: flex; gap: 8px; margin-bottom: 16px;">
-      <button v-for="t in (['nodes', 'policies', 'templates', 'events', 'access'] as const)" :key="t"
-        class="btn" :class="tab === t ? 'btn-primary' : 'btn-secondary'"
-        @click="setTab(t); t === 'events' && loadEvents()">
-        {{ { nodes: '节点状态', policies: '带宽策略', templates: '档位模板', events: '限速事件流', access: '快照 API 接入' }[t] }}
-      </button>
-    </div>
 
     <!-- 节点状态 -->
     <div v-if="tab === 'nodes'" class="card">

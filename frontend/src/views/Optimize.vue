@@ -1,14 +1,12 @@
 <script setup lang="ts">
 import { ref, onMounted , watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { hostsApi } from '../api'
 import axios from 'axios'
 
 const route = useRoute()
-const router = useRouter()
 const tab = ref<string>((route.query.tab as string) || 'init')
 watch(() => route.query.tab, t => { if (t) tab.value = t as string })
-function setTab(t: string) { router.replace({ query: { tab: t } }) }
 
 const hosts = ref<any[]>([])
 const components = ref<Record<string, any>>({})
@@ -140,13 +138,6 @@ function parseStatus(hostId: number) {
     <div v-if="notice" style="margin-bottom: 16px; padding: 12px 16px; border-radius: 12px;"
       :style="{ background: notice.ok ? 'rgba(52,199,89,0.08)' : 'rgba(255,59,48,0.08)', border: '1px solid ' + (notice.ok ? 'rgba(52,199,89,0.2)' : 'rgba(255,59,48,0.2)') }">
       <span style="font-size: 14px;">{{ notice.text }}</span>
-    </div>
-
-    <div style="display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;">
-      <button v-for="t in ['init', 'tune', 'rollback']" :key="t"
-        class="btn" :class="tab === t ? 'btn-primary' : 'btn-secondary'" @click="setTab(t)">
-        {{ { init: '一键初始化', tune: '参数优化', rollback: '回滚中心' }[t] }}
-      </button>
     </div>
 
     <div class="card" id="init">

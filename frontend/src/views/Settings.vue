@@ -11,7 +11,6 @@ import { formatTime } from '../time'
 const route = useRoute()
 const tab = ref<string>((route.query.tab as string) || 'account')
 watch(() => route.query.tab, t => { if (t) tab.value = t as string })
-function setTab(t: string) { router.replace({ query: { tab: t } }) }
 
 const router = useRouter()
 const notifications = ref<any[]>([])
@@ -356,13 +355,6 @@ async function deletePasskey() {
 
     <!-- Account Settings -->
 
-        <div style="display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;">
-          <button v-for="t in ['account', 'notify', 'about']" :key="t"
-            class="btn" :class="tab === t ? 'btn-primary' : 'btn-secondary'" @click="setTab(t)">
-            {{ { account: '账户与安全', notify: '通知渠道', about: '关于与更新' }[t] }}
-          </button>
-        </div>
-    
     <div class="card" v-if="tab === 'account'" style="margin-bottom: 16px;">
       <div class="card-header">
         <h3 id="account">账户设置</h3>
