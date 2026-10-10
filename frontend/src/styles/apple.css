@@ -78,6 +78,10 @@ body {
   flex-direction: column;
   gap: 2px;
   flex: 1;
+  /* 菜单全部展开超高时可滚动（min-height 0 是 flex 子项可缩的前提） */
+  overflow-y: auto;
+  min-height: 0;
+  scrollbar-width: thin;
 }
 
 .nav-item {
