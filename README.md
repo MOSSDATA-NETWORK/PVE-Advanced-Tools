@@ -102,6 +102,7 @@ After initialization, everyday access through your reverse-proxied domain is unr
 | `INITIAL_ADMIN_USERNAME` / `INITIAL_ADMIN_PASSWORD` | — | Bootstrap admin on first boot (only when no admin exists); remove after creation |
 | `UPDATE_GITHUB_REPO` | `MOSSDATA-NETWORK/PVE-Advanced-Tools` | Update source |
 | `platform_public_url` (panel setting) | — | Node-reachable platform URL, required before pushing vmqos configs |
+| `github_mirror_token` (panel setting) | — | GitHub token used when vmqos is a private repo; nodes then download the binary through the platform proxy (stored encrypted, masked in UI) |
 
 ## Quick start
 

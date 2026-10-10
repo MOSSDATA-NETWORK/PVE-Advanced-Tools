@@ -73,6 +73,15 @@ pub async fn revoke_retiring(pool: &SqlitePool, host_id: i64) -> anyhow::Result<
     Ok(())
 }
 
+/// 取 GitHub 镜像 token 明文（私有仓库 release 下载代理用；未配置返回 None）
+pub async fn github_mirror_token(state: &AppState) -> Option<String> {
+    let v: Option<String> = sqlx::query_scalar("SELECT value FROM settings WHERE key='github_mirror_token'")
+        .fetch_optional(&state.db).await.ok().flatten();
+    let v = v.filter(|x| !x.is_empty())?;
+    // 兼容早期明文写入
+    crate::crypto::decrypt(&v, &state.master_key).ok().or(Some(v))
+}
+
 /// 取主机当前 active token 明文（渲染配置用）
 pub async fn active_token_plain(pool: &SqlitePool, master_key: &[u8], host_id: i64, purpose: &str) -> anyhow::Result<String> {
     let enc: Option<(String,)> = sqlx::query_as(

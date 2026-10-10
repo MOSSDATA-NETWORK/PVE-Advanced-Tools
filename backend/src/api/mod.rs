@@ -39,6 +39,7 @@ pub fn routes(state: Arc<AppState>) -> Router {
         .route("/v1/vmqos/qos", get(vmqos::qos_entry).post(vmqos::qos_entry))
         .route("/v1/vmqos/qos/", get(vmqos::qos_entry).post(vmqos::qos_entry))
         .route("/v1/vmqos/intl", get(vmqos::intl_entry).post(vmqos::intl_entry))
+        .route("/v1/vmqos/agent/{version}/{file}", get(vmqos::agent_download))
         .with_state(state.clone());
 
     // 需要认证的路由

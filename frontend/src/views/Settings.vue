@@ -10,13 +10,20 @@ import { formatTime } from '../time'
 
 const route = useRoute()
 const platformUrl = ref('')
+const mirrorToken = ref('')
 async function loadPlatformSettings() {
   const res = await settingsApi.get()
   if (res.ok) platformUrl.value = res.data.platform_public_url || ''
+  if (res.ok) mirrorToken.value = res.data.github_mirror_token || ''
 }
 async function savePlatformUrl() {
   const res = await settingsApi.put('platform_public_url', platformUrl.value.trim())
   if (res.ok) alert('平台地址已保存')
+  else alert(res.error || '保存失败')
+}
+async function saveMirrorToken() {
+  const res = await settingsApi.put('github_mirror_token', mirrorToken.value.trim())
+  if (res.ok) alert('镜像 token 已保存')
   else alert(res.error || '保存失败')
 }
 
@@ -439,6 +446,11 @@ async function deletePasskey() {
       <p style="font-size: 13px; color: var(--text-secondary); margin-top: 8px;">
         下发 vmqos 配置前必填；节点将通过该地址拉取快照与上报限速事件。
       </p>
+      <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 12px;">
+        <label style="font-size: 14px; color: var(--text-secondary);">GitHub 镜像 token（vmqos 为私有仓库时，节点经平台代理下载）</label>
+        <input class="form-input" type="password" v-model="mirrorToken" placeholder="ghp_...（不修改请留 ***）" style="width: 320px;" />
+        <button class="btn btn-secondary" @click="saveMirrorToken">保存</button>
+      </div>
     </div>
 
 <div class="card" v-if="tab === 'about'" style="margin-bottom: 16px;">

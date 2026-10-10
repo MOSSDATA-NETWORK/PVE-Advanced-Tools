@@ -103,6 +103,7 @@ sudo bash deploy/install.sh [端口]   # 默认 3210
 | `UPDATE_SIGN_PUBKEY` | — | 更新验签公钥（ed25519 hex）。配置后发布必须带 `.sig`；未配置时拒绝在线更新（失败关闭） |
 | `UPDATE_GITHUB_REPO` | `MOSSDATA-NETWORK/PVE-Advanced-Tools` | 更新来源仓库 |
 | `platform_public_url`（面板设置） | — | 节点可达的平台地址，下发 vmqos 配置前必须配置 |
+| `github_mirror_token`（面板设置） | — | vmqos 为私有仓库时配置 GitHub token，节点经平台代理下载二进制（加密存储、只显示掩码） |
 
 ## 快速上手
 

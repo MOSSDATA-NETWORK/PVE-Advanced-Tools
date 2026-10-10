@@ -678,10 +678,21 @@ pub async fn qos_install(state: &Arc<AppState>, host_id: i64) -> anyhow::Result<
         return Err(anyhow::anyhow!("vmqos_download_base 非法（仅允许 https URL）"));
     }
     let fname = format!("vmqos-linux-amd64-v{}", version);
-    let dl_cmd = format!(
-        "cd /tmp && curl -fsSL --connect-timeout 15 -o {f} '{b}/v{v}/{f}' && curl -fsSL --connect-timeout 15 -o {f}.sums '{b}/v{v}/vmqos-v{v}-SHA256SUMS.txt' && grep ' {f}$' {f}.sums | sha256sum -c -",
-        f = fname, b = dl_base, v = version
-    );
+    // 配置了镜像 token（私有仓库）→ 节点经平台代理下载（带快照 token 鉴权）；
+    // 否则直连公开仓库
+    let dl_cmd = if crate::qos::github_mirror_token(state).await.is_some() {
+        let base = platform_base(state).await?;
+        let snap_tok = crate::qos::active_token_plain(&state.db, &state.master_key, host_id, "snapshot").await?;
+        format!(
+            "cd /tmp && curl -fsSL --connect-timeout 15 -H 'Authorization: Bearer {t}' -o {f} '{b}/api/v1/vmqos/agent/v{v}/{f}' && curl -fsSL --connect-timeout 15 -H 'Authorization: Bearer {t}' -o {f}.sums '{b}/api/v1/vmqos/agent/v{v}/vmqos-v{v}-SHA256SUMS.txt' && grep ' {f}$' {f}.sums | sha256sum -c -",
+            f = fname, b = base, v = version, t = snap_tok
+        )
+    } else {
+        format!(
+            "cd /tmp && curl -fsSL --connect-timeout 15 -o {f} '{b}/v{v}/{f}' && curl -fsSL --connect-timeout 15 -o {f}.sums '{b}/v{v}/vmqos-v{v}-SHA256SUMS.txt' && grep ' {f}$' {f}.sums | sha256sum -c -",
+            f = fname, b = dl_base, v = version
+        )
+    };
 
     Ok(JobSpec {
         kind: "qos.install".into(),

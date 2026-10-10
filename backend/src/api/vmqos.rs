@@ -1,7 +1,7 @@
 //! vmqos 节点面端点（契约 schema v2）：独立于管理员会话，按 token 鉴权。
 //! 错误形状按契约 §5：{"error": {"code", "message", "retryable", "request_id"}}
 use axum::{
-    extract::{Query, State},
+    extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     Json,
 };
@@ -172,6 +172,87 @@ async fn stage_query(state: Arc<AppState>, headers: HeaderMap, q: QosQuery) -> (
     match row {
         Some((stage,)) if stage > 0 => (StatusCode::OK, Json(json!({"ok": true, "stage": stage}))),
         _ => (StatusCode::NOT_FOUND, Json(json!({"ok": false, "stage": Value::Null}))),
+    }
+}
+
+/// GET /v1/vmqos/agent/{version}/{file} —— vmqos 二进制代理下载。
+/// 节点用快照 token 鉴权；平台带镜像 token 从 GitHub（可为私有仓库）拉取转发。
+/// 未配置镜像 token 时 404（节点应直连公开仓库下载）。
+pub async fn agent_download(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path((version, file)): Path<(String, String)>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let unauthorized = || (StatusCode::UNAUTHORIZED, Json(err_body("UNAUTHORIZED", "token 无效", false))).into_response();
+    let Some(token) = bearer_token(&headers) else { return unauthorized() };
+    if qos::verify_token(&state.db, "snapshot", token).await.is_none() {
+        return unauthorized();
+    }
+    // 严格白名单，防路径注入
+    let ok = |x: &str| !x.is_empty() && x.len() <= 80
+        && x.chars().all(|c| c.is_ascii_alphanumeric() || ".-_".contains(c));
+    if !ok(&version) || !ok(&file) || file.contains("..") {
+        return (StatusCode::BAD_REQUEST, Json(err_body("INVALID_REQUEST", "参数非法", false))).into_response();
+    }
+    let Some(mirror) = qos::github_mirror_token(&state).await else {
+        return (StatusCode::NOT_FOUND, Json(err_body("NOT_FOUND", "平台未配置镜像 token", false))).into_response();
+    };
+    // 私有仓库的 HTML 下载页不认 PAT——必须走 API：先按 tag 查 release 拿资产 ID，
+    // 再按资产 ID 以 Accept: application/octet-stream 取内容
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        // reqwest 默认跨域重定向剥离 Authorization，S3 跳转不泄 token
+        .redirect(reqwest::redirect::Policy::limited(5))
+        .build().unwrap_or_default();
+    let gh = |url: String, accept: &str| {
+        client.get(url)
+            .header("Authorization", format!("Bearer {}", mirror))
+            .header("Accept", accept.to_string())
+            .header("User-Agent", "pve-advanced-tools")
+            .header("X-GitHub-Api-Version", "2022-11-28")
+    };
+    let bad_gateway = |msg: &str| (StatusCode::BAD_GATEWAY, Json(err_body("UPSTREAM", msg, true))).into_response();
+
+    let rel_url = format!(
+        "https://api.github.com/repos/MOSSDATA-NETWORK/vmqos/releases/tags/{}", version
+    );
+    let release = match gh(rel_url, "application/vnd.github+json").send().await {
+        Ok(r) if r.status().is_success() => r,
+        Ok(r) => return bad_gateway(&format!("GitHub 查询 release 返回 {}", r.status())),
+        Err(e) => {
+            tracing::error!("代理查询 release 失败: {}", e);
+            return bad_gateway("连接 GitHub 失败");
+        }
+    };
+    let body: Value = match release.json().await {
+        Ok(v) => v,
+        Err(_) => return bad_gateway("release 响应解析失败"),
+    };
+    let asset_id = body.get("assets").and_then(|a| a.as_array())
+        .and_then(|arr| arr.iter().find(|a| a.get("name").and_then(|n| n.as_str()) == Some(&file)))
+        .and_then(|a| a.get("id")).and_then(|i| i.as_u64());
+    let Some(asset_id) = asset_id else {
+        return (StatusCode::NOT_FOUND, Json(err_body("NOT_FOUND", "发布中无此文件", false))).into_response();
+    };
+
+    let dl_url = format!("https://api.github.com/repos/MOSSDATA-NETWORK/vmqos/releases/assets/{}", asset_id);
+    match gh(dl_url, "application/octet-stream").send().await {
+        Ok(resp) if resp.status().is_success() => {
+            match resp.bytes().await {
+                Ok(bytes) => (
+                    StatusCode::OK,
+                    [(axum::http::header::CONTENT_TYPE, "application/octet-stream")],
+                    bytes,
+                ).into_response(),
+                Err(_) => bad_gateway("读取上游内容失败"),
+            }
+        }
+        Ok(resp) => bad_gateway(&format!("GitHub 下载返回 {}", resp.status())),
+        Err(e) => {
+            tracing::error!("代理下载失败: {}", e);
+            bad_gateway("连接 GitHub 失败")
+        }
     }
 }
 
