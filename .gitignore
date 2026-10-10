@@ -1,0 +1,25 @@
+# 构建产物
+backend/target/
+backend/static/
+frontend/node_modules/
+frontend/dist/
+
+# 运行时数据
+data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.bak
+
+# 系统与编辑器
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# 工具与缓存
+.claude/
+.codegraph/
+__pycache__/
+*.pyc

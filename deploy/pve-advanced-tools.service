@@ -1,0 +1,38 @@
+[Unit]
+Description=PVE-Advanced-Tools - PVE 母机一体化管控平台
+Documentation=https://github.com/MOSSDATA-NETWORK/PVE-Advanced-Tools
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/pve-advanced-tools
+ExecStart=/opt/pve-advanced-tools/pve-advanced-tools
+Restart=on-failure
+RestartSec=5
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+# 环境变量（按需修改）
+Environment=PORT=3210
+Environment=STATIC_DIR=/opt/pve-advanced-tools/static
+Environment=DATABASE_URL=sqlite:/opt/pve-advanced-tools/pve-advanced-tools.db?mode=rwc
+Environment=DATA_DIR=/opt/pve-advanced-tools/data
+# MASTER_KEY 从 env 文件加载（install.sh 生成，root 600）：
+# EnvironmentFile=/opt/pve-advanced-tools/env
+
+# 安全加固
+NoNewPrivileges=false
+ProtectSystem=false
+ProtectHome=false
+ReadWritePaths=/opt/pve-advanced-tools
+
+# 日志
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pve-advanced-tools
+
+[Install]
+WantedBy=multi-user.target

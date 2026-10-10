@@ -1,0 +1,731 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Noqjj — 禁止切鸡鸡</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- Sidebar -->
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="28" height="28">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+      <path d="M9 12l2 2 4-4"/>
+    </svg>
+    Noqjj
+  </div>
+  <nav class="sidebar-nav">
+    <a class="nav-item active" onclick="showPage('dashboard')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+      总览
+    </a>
+    <a class="nav-item" onclick="showPage('hosts')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+      主机管理
+    </a>
+    <a class="nav-item" onclick="showPage('scans')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+      扫描记录
+    </a>
+    <a class="nav-item" onclick="showPage('results')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      检测结果
+    </a>
+    <a class="nav-item" onclick="showPage('settings')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+      设置
+    </a>
+  </nav>
+  <div class="sidebar-footer">
+    <div class="update-banner" onclick="showPage('settings')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      新版本 v0.3.0
+    </div>
+    <div class="version-text">v0.2.1</div>
+  </div>
+</aside>
+
+<!-- Main Content -->
+<main class="main-content">
+
+  <!-- ==================== Dashboard ==================== -->
+  <div id="page-dashboard" class="page active">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">总览</h1>
+        <p class="page-subtitle">Noqjj — PVE 切鸡检测平台</p>
+      </div>
+      <button class="btn btn-primary" onclick="alert('扫描已启动')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+        扫描全部
+      </button>
+    </div>
+
+    <div class="card-grid">
+      <div class="stat-card">
+        <div class="stat-icon" style="background: rgba(0,122,255,0.1); color: var(--accent);">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/></svg>
+        </div>
+        <div>
+          <div class="stat-value">5</div>
+          <div class="stat-label">PVE 主机</div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="background: rgba(52,199,89,0.1); color: var(--green);">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+        </div>
+        <div>
+          <div class="stat-value">5</div>
+          <div class="stat-label">在线主机</div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="background: rgba(175,82,222,0.1); color: var(--purple);">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        </div>
+        <div>
+          <div class="stat-value">1,247</div>
+          <div class="stat-label">已扫描 VM</div>
+        </div>
+      </div>
+      <div class="stat-card threat">
+        <div class="stat-icon" style="background: rgba(255,59,48,0.1); color: var(--red);">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        </div>
+        <div>
+          <div class="stat-value" style="color: var(--red)">3</div>
+          <div class="stat-label">活跃威胁</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="two-col">
+      <div class="card">
+        <div class="card-header">
+          <h3>最近扫描</h3>
+          <a class="link" onclick="showPage('scans')">查看全部</a>
+        </div>
+        <div class="list-item">
+          <div class="list-item-left">
+            <div class="list-item-title">扫描 #42</div>
+            <div class="list-item-sub">全部主机 · 2 分钟前</div>
+          </div>
+          <span class="badge badge-detected"><span class="badge-dot"></span>3 台命中</span>
+        </div>
+        <div class="list-item">
+          <div class="list-item-left">
+            <div class="list-item-title">扫描 #41</div>
+            <div class="list-item-sub">tpe2-srv18 · 6 小时前</div>
+          </div>
+          <span class="badge badge-clean"><span class="badge-dot"></span>全部正常</span>
+        </div>
+        <div class="list-item">
+          <div class="list-item-left">
+            <div class="list-item-title">扫描 #40</div>
+            <div class="list-item-sub">全部主机 · 12 小时前</div>
+          </div>
+          <span class="badge badge-detected"><span class="badge-dot"></span>1 台命中</span>
+        </div>
+        <div class="list-item">
+          <div class="list-item-left">
+            <div class="list-item-title">扫描 #39</div>
+            <div class="list-item-sub">hkg1-srv03 · 1 天前</div>
+          </div>
+          <span class="badge badge-clean"><span class="badge-dot"></span>全部正常</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h3>威胁列表</h3>
+          <a class="link" onclick="showPage('results')">查看全部</a>
+        </div>
+        <div class="list-item threat-item">
+          <div class="list-item-left">
+            <div class="list-item-title">VM 320</div>
+            <div class="list-item-sub">tpe2-srv18 · 首次发现: 2026-08-25</div>
+          </div>
+          <span class="badge badge-detected"><span class="badge-dot"></span>新发现</span>
+        </div>
+        <div class="list-item threat-item">
+          <div class="list-item-left">
+            <div class="list-item-title">VM 571</div>
+            <div class="list-item-sub">tpe2-srv18 · 首次发现: 2026-08-28</div>
+          </div>
+          <span class="badge badge-confirmed"><span class="badge-dot"></span>持续存在</span>
+        </div>
+        <div class="list-item threat-item">
+          <div class="list-item-left">
+            <div class="list-item-title">VM 188</div>
+            <div class="list-item-sub">hkg1-srv03 · 首次发现: 2026-08-30</div>
+          </div>
+          <span class="badge badge-detected"><span class="badge-dot"></span>新发现</span>
+        </div>
+        <div class="list-item" style="opacity: 0.5;">
+          <div class="list-item-left">
+            <div class="list-item-title">VM 245</div>
+            <div class="list-item-sub">tpe2-srv18 · 已清除: 2026-08-29</div>
+          </div>
+          <span class="badge badge-cleaned"><span class="badge-dot"></span>已清除</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== Hosts ==================== -->
+  <div id="page-hosts" class="page">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">主机管理</h1>
+        <p class="page-subtitle">管理 PVE 宿主机，添加后自动部署检测脚本</p>
+      </div>
+      <div style="display:flex;gap:12px;">
+        <button class="btn btn-secondary">扫描全部</button>
+        <button class="btn btn-primary" onclick="document.getElementById('addModal').classList.add('show')">+ 添加主机</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <table>
+        <thead>
+          <tr><th>名称</th><th>地址</th><th>接入方式</th><th>状态</th><th>Agent</th><th style="text-align:right">操作</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>tpe2-srv18</strong></td>
+            <td><code>78.105.182.253:22</code></td>
+            <td>SSH 密码</td>
+            <td><span class="badge badge-online"><span class="badge-dot"></span>online</span></td>
+            <td><span class="badge badge-online"><span class="badge-dot"></span>已部署</span></td>
+            <td class="actions">
+              <button class="btn btn-sm btn-secondary">扫描</button>
+              <button class="btn btn-sm btn-secondary">编辑</button>
+              <button class="btn btn-sm btn-danger">删除</button>
+            </td>
+          </tr>
+          <tr>
+            <td><strong>hkg1-srv03</strong></td>
+            <td><code>103.152.218.12:22</code></td>
+            <td>SSH Key</td>
+            <td><span class="badge badge-online"><span class="badge-dot"></span>online</span></td>
+            <td><span class="badge badge-online"><span class="badge-dot"></span>已部署</span></td>
+            <td class="actions">
+              <button class="btn btn-sm btn-secondary">扫描</button>
+              <button class="btn btn-sm btn-secondary">编辑</button>
+              <button class="btn btn-sm btn-danger">删除</button>
+            </td>
+          </tr>
+          <tr>
+            <td><strong>sgp1-srv07</strong></td>
+            <td><code>194.233.82.55:22</code></td>
+            <td>API Token</td>
+            <td><span class="badge badge-online"><span class="badge-dot"></span>online</span></td>
+            <td><span class="badge badge-online"><span class="badge-dot"></span>已部署</span></td>
+            <td class="actions">
+              <button class="btn btn-sm btn-secondary">扫描</button>
+              <button class="btn btn-sm btn-secondary">编辑</button>
+              <button class="btn btn-sm btn-danger">删除</button>
+            </td>
+          </tr>
+          <tr>
+            <td><strong>de-fra-srv02</strong></td>
+            <td><code>5.189.160.88:22</code></td>
+            <td>SSH 密码</td>
+            <td><span class="badge badge-offline"><span class="badge-dot"></span>offline</span></td>
+            <td><span class="badge badge-unknown"><span class="badge-dot"></span>未部署</span></td>
+            <td class="actions">
+              <button class="btn btn-sm btn-secondary">测试连接</button>
+              <button class="btn btn-sm btn-secondary">编辑</button>
+              <button class="btn btn-sm btn-danger">删除</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ==================== Scans ==================== -->
+  <div id="page-scans" class="page">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">扫描记录</h1>
+        <p class="page-subtitle">查看历史扫描任务</p>
+      </div>
+    </div>
+    <div class="card">
+      <table>
+        <thead>
+          <tr><th>ID</th><th>主机</th><th>状态</th><th>VM</th><th>GA</th><th>磁盘</th><th>命中</th><th>耗时</th><th>时间</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><strong>#42</strong></td><td>全部</td><td><span class="badge badge-clean"><span class="badge-dot"></span>已完成</span></td><td>1247</td><td>892</td><td>355</td><td style="color:var(--red);font-weight:600">3</td><td>12分34秒</td><td>2026-08-31 02:00</td></tr>
+          <tr><td><strong>#41</strong></td><td>tpe2-srv18</td><td><span class="badge badge-clean"><span class="badge-dot"></span>已完成</span></td><td>287</td><td>201</td><td>86</td><td style="color:var(--green);font-weight:600">0</td><td>3分12秒</td><td>2026-08-30 20:00</td></tr>
+          <tr><td><strong>#40</strong></td><td>全部</td><td><span class="badge badge-clean"><span class="badge-dot"></span>已完成</span></td><td>1247</td><td>890</td><td>357</td><td style="color:var(--red);font-weight:600">1</td><td>11分58秒</td><td>2026-08-30 14:00</td></tr>
+          <tr><td><strong>#39</strong></td><td>hkg1-srv03</td><td><span class="badge badge-clean"><span class="badge-dot"></span>已完成</span></td><td>156</td><td>98</td><td>58</td><td style="color:var(--green);font-weight:600">0</td><td>2分05秒</td><td>2026-08-30 08:00</td></tr>
+          <tr><td><strong>#38</strong></td><td>全部</td><td><span class="badge badge-detected"><span class="badge-dot"></span>已完成</span></td><td>1247</td><td>888</td><td>359</td><td style="color:var(--red);font-weight:600">2</td><td>12分21秒</td><td>2026-08-30 02:00</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ==================== Results ==================== -->
+  <div id="page-results" class="page">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">检测结果</h1>
+        <p class="page-subtitle">查看所有 VM 的检测状态</p>
+      </div>
+      <div style="display:flex;gap:12px;">
+        <select class="form-input" style="width:160px"><option>全部主机</option><option>tpe2-srv18</option><option>hkg1-srv03</option></select>
+        <select class="form-input" style="width:140px"><option>全部状态</option><option>新发现</option><option>持续存在</option><option>已清除</option></select>
+      </div>
+    </div>
+    <div class="card">
+      <table>
+        <thead>
+          <tr><th>VM</th><th>主机</th><th>状态</th><th>检测方式</th><th>证据</th><th>首次发现</th><th>最后检测</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>VM 320</strong></td><td>tpe2-srv18</td>
+            <td><span class="badge badge-detected"><span class="badge-dot"></span>新发现</span></td>
+            <td><code>disk</code></td>
+            <td class="evidence">incus_dir incushlii_agent nodeget_agent systemd_svc:12 history:5</td>
+            <td>2026-08-25</td><td>2026-08-31 02:00</td>
+          </tr>
+          <tr>
+            <td><strong>VM 571</strong></td><td>tpe2-srv18</td>
+            <td><span class="badge badge-confirmed"><span class="badge-dot"></span>持续存在</span></td>
+            <td><code>ga</code></td>
+            <td class="evidence">incus_dir incushlii_agent nodeget_agent systemd_svc:8</td>
+            <td>2026-08-28</td><td>2026-08-31 02:00</td>
+          </tr>
+          <tr>
+            <td><strong>VM 188</strong></td><td>hkg1-srv03</td>
+            <td><span class="badge badge-detected"><span class="badge-dot"></span>新发现</span></td>
+            <td><code>ga</code></td>
+            <td class="evidence">incushlii_agent nodeget_agent systemd_svc:6 history:3</td>
+            <td>2026-08-30</td><td>2026-08-30 14:00</td>
+          </tr>
+          <tr style="opacity:0.5">
+            <td><strong>VM 245</strong></td><td>tpe2-srv18</td>
+            <td><span class="badge badge-cleaned"><span class="badge-dot"></span>已清除</span></td>
+            <td><code>ga</code></td>
+            <td class="evidence">—</td>
+            <td>2026-08-20</td><td>2026-08-29 14:00</td>
+          </tr>
+          <tr>
+            <td><strong>VM 89</strong></td><td>sgp1-srv07</td>
+            <td><span class="badge badge-detected"><span class="badge-dot"></span>新发现</span></td>
+            <td><code>disk</code></td>
+            <td class="evidence">incus_dir incus_data systemd_svc:4 history:2</td>
+            <td>2026-08-30</td><td>2026-08-30 14:00</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ==================== Settings ==================== -->
+  <div id="page-settings" class="page">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">设置</h1>
+        <p class="page-subtitle">系统设置与账户管理</p>
+      </div>
+    </div>
+
+    <!-- Account Settings -->
+    <div class="card" style="margin-bottom: 16px;">
+      <div class="card-header"><h3>账户设置</h3></div>
+      <div class="settings-grid">
+        <div class="settings-item" onclick="document.getElementById('passwordModal').classList.add('show')">
+          <div class="settings-item-icon" style="background: rgba(0,122,255,0.1); color: var(--accent);">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+          </div>
+          <div>
+            <div class="settings-item-title">修改密码</div>
+            <div class="settings-item-desc">更改登录密码</div>
+          </div>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16" style="margin-left:auto;color:var(--text-tertiary)"><polyline points="9 18 15 12 9 6"/></svg>
+        </div>
+
+        <div class="settings-item" onclick="document.getElementById('totpModal').classList.add('show')">
+          <div class="settings-item-icon" style="background: rgba(175,82,222,0.1); color: var(--purple);">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
+          </div>
+          <div>
+            <div class="settings-item-title">TOTP 身份验证器</div>
+            <div class="settings-item-desc">重新绑定或禁用二次验证</div>
+          </div>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16" style="margin-left:auto;color:var(--text-tertiary)"><polyline points="9 18 15 12 9 6"/></svg>
+        </div>
+
+        <div class="settings-item" onclick="document.getElementById('passkeyModal').classList.add('show')">
+          <div class="settings-item-icon" style="background: rgba(52,199,89,0.1); color: var(--green);">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+          </div>
+          <div style="flex:1;">
+            <div class="settings-item-title">Passkey</div>
+            <div class="settings-item-desc">支持 iCloud 钥匙串、Google、Bitwarden 等</div>
+          </div>
+          <span class="badge badge-online">已注册</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16" style="color:var(--text-tertiary)"><polyline points="9 18 15 12 9 6"/></svg>
+        </div>
+
+        <div class="settings-item" style="border: 1px solid rgba(255,59,48,0.2);" onclick="alert('已退出登录')">
+          <div class="settings-item-icon" style="background: rgba(255,59,48,0.1); color: var(--red);">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+          </div>
+          <div>
+            <div class="settings-item-title" style="color:var(--red)">退出登录</div>
+            <div class="settings-item-desc">退出当前账户</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Version Card -->
+    <div class="card" style="margin-bottom: 16px;">
+      <div class="card-header"><h3>版本信息</h3></div>
+      <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px;">
+        <div>
+          <div style="font-size: 28px; font-weight: 700;">Noqjj <span style="color: var(--accent);">v0.2.1</span></div>
+          <div style="margin-top: 8px;">
+            <span class="badge badge-detected" style="font-size: 13px;"><span class="badge-dot"></span>新版本 v0.3.0 可用</span>
+          </div>
+        </div>
+        <div style="display: flex; gap: 12px;">
+          <button class="btn btn-secondary">检查更新</button>
+          <button class="btn btn-secondary" onclick="document.getElementById('changelogModal').classList.add('show')">更新日志</button>
+          <button class="btn btn-primary">立即更新</button>
+        </div>
+      </div>
+      <div style="margin-top: 16px; padding: 16px; background: rgba(0,122,255,0.05); border-radius: 12px;">
+        <div style="font-weight: 600; margin-bottom: 8px;">v0.3.0 更新内容</div>
+        <div style="font-size: 14px; color: var(--text-secondary); white-space: pre-wrap;">✨ 新增 Passkey 登录支持
+🔧 优化磁盘挂载检测性能
+🐛 修复 GA 模式下 bash_history 检测遗漏
+📱 新增 Telegram 通知模板自定义</div>
+        <a href="https://github.com/MOSSDATA-NETWORK/Noqjj/releases" target="_blank" style="display: inline-block; margin-top: 8px; font-size: 13px; color: var(--accent);">在 GitHub 查看 →</a>
+      </div>
+    </div>
+
+    <!-- Notification Section -->
+    <div style="display: flex; justify-content: space-between; align-items: center; margin: 28px 0 16px;">
+      <h2 style="font-size: 20px; font-weight: 600;">通知设置</h2>
+      <div style="display: flex; gap: 12px;">
+        <button class="btn btn-secondary">测试通知</button>
+        <button class="btn btn-primary" onclick="document.getElementById('notifyModal').classList.add('show')">+ 添加通知</button>
+      </div>
+    </div>
+    <div class="card">
+      <table>
+        <thead><tr><th>类型</th><th>状态</th><th>通知级别</th><th>配置</th><th style="text-align:right">操作</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>📱 Telegram</strong></td>
+            <td><span class="badge badge-online"><span class="badge-dot"></span>已启用</span></td>
+            <td>新发现 + 已清除</td>
+            <td style="font-size:13px;color:var(--text-secondary)">Bot: 712***:AAH*** · Chat: 102***</td>
+            <td class="actions"><button class="btn btn-sm btn-secondary">编辑</button></td>
+          </tr>
+          <tr>
+            <td><strong>💬 企业微信</strong></td>
+            <td><span class="badge badge-online"><span class="badge-dot"></span>已启用</span></td>
+            <td>仅新发现</td>
+            <td style="font-size:13px;color:var(--text-secondary)">Webhook: https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=***</td>
+            <td class="actions"><button class="btn btn-sm btn-secondary">编辑</button></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</main>
+
+<!-- ==================== Modals ==================== -->
+
+<!-- Add Host Modal -->
+<div id="addModal" class="modal-overlay" onclick="if(event.target===this)this.classList.remove('show')">
+  <div class="modal">
+    <div class="modal-header">添加主机</div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">名称</label>
+        <input class="form-input" placeholder="如：tpe2-srv18" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">IP 地址</label>
+        <input class="form-input" placeholder="78.105.182.253" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">接入方式</label>
+        <select class="form-input" id="authTypeSelect" onchange="updateAuthFields()">
+          <option value="password">SSH 密码</option>
+          <option value="ssh_key">SSH 私钥</option>
+          <option value="api_token">PVE API Token</option>
+        </select>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div class="form-group">
+          <label class="form-label">SSH 端口</label>
+          <input class="form-input" value="22" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">用户名</label>
+          <input class="form-input" value="root" />
+        </div>
+      </div>
+      <div id="authFieldPassword" class="form-group">
+        <label class="form-label">密码</label>
+        <input class="form-input" type="password" placeholder="SSH 密码" />
+      </div>
+      <div id="authFieldKey" class="form-group" style="display:none">
+        <label class="form-label">SSH 私钥</label>
+        <div class="key-dropzone" id="keyDropzone">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="32" height="32" style="color:var(--text-tertiary);margin-bottom:8px;">
+            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+          </svg>
+          <div style="font-size:14px;font-weight:500;margin-bottom:4px;">拖拽私钥文件到此处</div>
+          <div style="font-size:12px;color:var(--text-secondary);">或点击选择文件</div>
+        </div>
+        <details class="key-paste-details" style="margin-top:8px;">
+          <summary style="font-size:12px;color:var(--accent);cursor:pointer;">或粘贴私钥内容</summary>
+          <textarea class="form-input" rows="5" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;粘贴完整私钥内容...&#10;-----END OPENSSH PRIVATE KEY-----" style="margin-top:8px;font-family:monospace;font-size:12px;resize:vertical;"></textarea>
+        </details>
+        <div style="font-size:11px;color:var(--text-tertiary);margin-top:6px;">私钥将加密存储，用于 SSH 连接 PVE 主机</div>
+      </div>
+      <div id="authFieldToken" class="form-group" style="display:none">
+        <label class="form-label">PVE API Token</label>
+        <input class="form-input" placeholder="user@pve!tokenid=secret" />
+        <div class="hint">格式：用户名@pve!token名=token值</div>
+      </div>
+      <div class="hint">添加后将自动通过 SSH 上传检测脚本到 PVE 宿主机</div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="document.getElementById('addModal').classList.remove('show')">取消</button>
+      <button class="btn btn-primary" onclick="document.getElementById('addModal').classList.remove('show');alert('主机已添加，检测脚本已部署')">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Notification Modal -->
+<div id="notifyModal" class="modal-overlay" onclick="if(event.target===this)this.classList.remove('show')">
+  <div class="modal">
+    <div class="modal-header">添加通知</div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">通知类型</label>
+        <div style="display: flex; gap: 12px;">
+          <button class="btn btn-primary notify-type-btn" id="btnTelegram" onclick="switchNotifyType('telegram')">📱 Telegram</button>
+          <button class="btn btn-secondary notify-type-btn" id="btnWecom" onclick="switchNotifyType('wecom')">💬 企业微信</button>
+        </div>
+      </div>
+      <div id="notifyTelegramFields">
+        <div class="form-group">
+          <label class="form-label">Telegram Bot Token</label>
+          <input class="form-input" placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Chat ID</label>
+          <input class="form-input" placeholder="123456789" />
+        </div>
+      </div>
+      <div id="notifyWecomFields" style="display:none">
+        <div class="form-group">
+          <label class="form-label">企业微信 Webhook URL</label>
+          <input class="form-input" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..." />
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">通知级别</label>
+        <select class="form-input">
+          <option>全部通知</option>
+          <option>仅新发现</option>
+          <option selected>新发现 + 已清除</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="document.getElementById('notifyModal').classList.remove('show')">取消</button>
+      <button class="btn btn-primary" onclick="document.getElementById('notifyModal').classList.remove('show');alert('通知已添加')">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- Change Password Modal -->
+<div id="passwordModal" class="modal-overlay" onclick="if(event.target===this)this.classList.remove('show')">
+  <div class="modal">
+    <div class="modal-header">修改密码</div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">当前密码</label>
+        <input class="form-input" type="password" placeholder="请输入当前密码" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">新密码</label>
+        <input class="form-input" type="password" placeholder="至少8位" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">确认新密码</label>
+        <input class="form-input" type="password" placeholder="再次输入新密码" />
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="document.getElementById('passwordModal').classList.remove('show')">取消</button>
+      <button class="btn btn-primary" onclick="document.getElementById('passwordModal').classList.remove('show');alert('密码已修改，请重新登录')">确认修改</button>
+    </div>
+  </div>
+</div>
+
+<!-- TOTP Modal -->
+<div id="totpModal" class="modal-overlay" onclick="if(event.target===this)this.classList.remove('show')">
+  <div class="modal">
+    <div class="modal-header">TOTP 身份验证器</div>
+    <div class="modal-body">
+      <p style="font-size: 14px; color: var(--text-secondary); margin-bottom: 16px;">请输入密码以验证身份</p>
+      <div class="form-group">
+        <label class="form-label">密码</label>
+        <input class="form-input" type="password" placeholder="请输入登录密码" />
+      </div>
+      <div style="display: flex; gap: 12px; justify-content: flex-end;">
+        <button class="btn btn-danger" onclick="document.getElementById('totpModal').classList.remove('show');alert('TOTP 已禁用')">禁用 TOTP</button>
+        <button class="btn btn-primary" onclick="alert('请扫描二维码完成绑定')">重新绑定</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Passkey Modal -->
+<div id="passkeyModal" class="modal-overlay" onclick="if(event.target===this)this.classList.remove('show')">
+  <div class="modal">
+    <div class="modal-header">Passkey 管理</div>
+    <div class="modal-body">
+      <div style="margin-bottom: 20px;">
+        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20" style="color:var(--green)"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+          <span style="font-weight: 600;">已注册 Passkey</span>
+        </div>
+        <p style="font-size: 13px; color: var(--text-secondary);">支持使用指纹、面容或安全密钥直接登录，无需密码。</p>
+      </div>
+
+      <div style="background: var(--bg); border-radius: 12px; padding: 16px; margin-bottom: 16px;">
+        <div style="font-size: 13px; font-weight: 600; margin-bottom: 10px;">支持的 Passkey 来源</div>
+        <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+          <span class="passkey-source">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+            iCloud 钥匙串
+          </span>
+          <span class="passkey-source">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+            Google 密码管理器
+          </span>
+          <span class="passkey-source">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+            Bitwarden
+          </span>
+          <span class="passkey-source">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/></svg>
+            1Password
+          </span>
+          <span class="passkey-source">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M17.81 4.47c-.08 0-.16-.02-.23-.06C15.66 3.42 14 3 12.01 3c-1.98 0-3.86.47-5.57 1.41-.24.13-.54.04-.68-.2-.13-.24-.04-.55.2-.68C7.82 2.52 9.86 2 12.01 2c2.13 0 3.99.47 6.03 1.52.25.13.34.43.21.67-.09.18-.26.28-.44.28z"/><path d="M3.5 9.72c-.1 0-.2-.03-.29-.09-.23-.16-.28-.47-.12-.7.99-1.4 2.25-2.5 3.75-3.27C9.98 4.04 14 4.03 17.15 5.65c1.5.77 2.76 1.86 3.75 3.25.16.22.11.54-.12.7-.23.16-.54.11-.7-.12-.9-1.26-2.04-2.25-3.39-2.94-2.87-1.47-6.54-1.47-9.4.01-1.36.7-2.5 1.7-3.4 2.96-.08.14-.23.21-.39.21z"/><path d="M9.75 21.79c-.13 0-.26-.05-.35-.15-.87-.87-1.34-1.43-2.01-2.64-.69-1.23-1.05-2.73-1.05-4.34 0-2.97 2.54-5.39 5.66-5.39s5.66 2.42 5.66 5.39c0 .28-.22.5-.5.5s-.5-.22-.5-.5c0-2.42-2.09-4.39-4.66-4.39-2.57 0-4.66 1.97-4.66 4.39 0 1.44.32 2.77.93 3.85.64 1.15 1.08 1.64 1.85 2.42.19.2.19.51 0 .71-.11.1-.24.15-.37.15z"/><path d="M16.92 19.94c-1.19 0-2.24-.3-3.1-.89-1.49-1.01-2.38-2.65-2.38-4.39 0-.28.22-.5.5-.5s.5.22.5.5c0 1.41.72 2.74 1.94 3.56.71.48 1.54.71 2.54.71.24 0 .64-.03 1.04-.1.27-.05.53.13.58.41.05.27-.13.53-.41.58-.57.11-1.07.12-1.21.12z"/></svg>
+            安全密钥 (YubiKey)
+          </span>
+          <span class="passkey-source">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"/><path d="M12 6c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6-2.69-6-6-6zm0 10c-2.21 0-4-1.79-4-4s1.79-4 4-4 4 1.79 4 4-1.79 4-4 4z"/></svg>
+            设备指纹/面容
+          </span>
+        </div>
+      </div>
+
+      <div style="display: flex; gap: 12px; justify-content: flex-end;">
+        <button class="btn btn-danger" onclick="if(confirm('确定删除 Passkey？')){document.getElementById('passkeyModal').classList.remove('show');alert('Passkey 已删除')}">删除 Passkey</button>
+        <button class="btn btn-primary" onclick="alert('浏览器将弹出 Passkey 注册窗口')">添加新 Passkey</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Changelog Modal -->
+<div id="changelogModal" class="modal-overlay" onclick="if(event.target===this)this.classList.remove('show')">
+  <div class="modal" style="max-width: 600px;">
+    <div class="modal-header">更新日志</div>
+    <div class="modal-body" style="max-height: 60vh; overflow-y: auto;">
+      <div class="changelog-entry">
+        <div class="changelog-header">
+          <span class="changelog-version">v0.2.1</span>
+          <span class="changelog-date">2026-08-31</span>
+        </div>
+        <div class="changelog-notes">🐛 修复主机弹窗接入方式切换布局
+🐛 修复通知添加按钮无响应
+✨ 新增账户设置：修改密码、重置 TOTP、禁用 TOTP</div>
+      </div>
+      <div class="changelog-entry">
+        <div class="changelog-header">
+          <span class="changelog-version">v0.2.0</span>
+          <span class="changelog-date">2026-08-30</span>
+        </div>
+        <div class="changelog-notes">🔐 新增 TOTP 身份验证器支持
+🚀 添加主机后自动部署检测脚本
+🔑 支持 SSH Key / PVE API Token 接入
+🎨 Apple Design UI 重构</div>
+      </div>
+      <div class="changelog-entry">
+        <div class="changelog-header">
+          <span class="changelog-version">v0.1.0</span>
+          <span class="changelog-date">2026-08-29</span>
+        </div>
+        <div class="changelog-notes">🎉 首次发布
+🔍 GA + 磁盘挂载双模式检测
+📱 Telegram + 企业微信告警
+⏰ 定时扫描调度</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="document.getElementById('changelogModal').classList.remove('show')">关闭</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function showPage(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  event.target.closest('.nav-item')?.classList.add('active');
+}
+
+function updateAuthFields() {
+  var type = document.getElementById('authTypeSelect').value;
+  document.getElementById('authFieldPassword').style.display = type === 'password' ? '' : 'none';
+  document.getElementById('authFieldKey').style.display = type === 'ssh_key' ? '' : 'none';
+  document.getElementById('authFieldToken').style.display = type === 'api_token' ? '' : 'none';
+}
+
+function switchNotifyType(type) {
+  var btnTg = document.getElementById('btnTelegram');
+  var btnWc = document.getElementById('btnWecom');
+  var fieldsTg = document.getElementById('notifyTelegramFields');
+  var fieldsWc = document.getElementById('notifyWecomFields');
+  if (type === 'telegram') {
+    btnTg.className = 'btn btn-primary notify-type-btn';
+    btnWc.className = 'btn btn-secondary notify-type-btn';
+    fieldsTg.style.display = '';
+    fieldsWc.style.display = 'none';
+  } else {
+    btnTg.className = 'btn btn-secondary notify-type-btn';
+    btnWc.className = 'btn btn-primary notify-type-btn';
+    fieldsTg.style.display = 'none';
+    fieldsWc.style.display = '';
+  }
+}
+</script>
+
+</body>
+</html>
