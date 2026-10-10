@@ -31,7 +31,6 @@ pub struct AppState {
     pub tls_enabled: bool,
     pub login_limiter: ratelimit::RateLimiter,
     pub static_dir: String,
-    pub index_html: String,
     /// 平台维护的 known_hosts 文件路径（指纹固定后 SSH 必用）
     pub known_hosts_path: String,
     /// 每主机任务串行锁
@@ -202,8 +201,8 @@ async fn main() -> anyhow::Result<()> {
     let static_dir = std::env::var("STATIC_DIR")
         .unwrap_or_else(|_| "static".to_string());
 
-    let index_html = std::fs::read_to_string(format!("{}/index.html", static_dir))
-        .unwrap_or_else(|_| "<h1>index.html not found</h1>".to_string());
+    // index.html 不预读：每次请求现读磁盘。构建产物哈希随版本变化，
+    // 内存缓存旧版 index 会引用不存在的资产导致白屏（事故教训 2026-10-10）
 
     // 平台数据目录：known_hosts 等运行时文件
     let data_dir = std::env::var("DATA_DIR").unwrap_or_else(|_| "data".to_string());
@@ -215,7 +214,6 @@ async fn main() -> anyhow::Result<()> {
         tls_enabled,
         login_limiter: ratelimit::RateLimiter::new(5, 300), // 5次/5分钟
         static_dir: static_dir.clone(),
-        index_html,
         known_hosts_path: known_hosts_path.clone(),
         job_locks: jobs::HostLocks::default(),
     });
@@ -291,8 +289,11 @@ async fn main() -> anyhow::Result<()> {
         .nest("/api", api::routes(state.clone()))
         .fallback_service(tower::service_fn(move |req: axum::http::Request<axum::body::Body>| {
             let static_dir = state.static_dir.clone();
-            let index_html = state.index_html.clone();
             async move {
+                // 每次现读（小文件，开销可忽略；正确性优先）
+                let index_html = tokio::fs::read_to_string(format!("{}/index.html", static_dir))
+                    .await
+                    .unwrap_or_else(|_| "<h1>index.html not found</h1>".to_string());
                 let path = req.uri().path().to_string();
 
                 // 安全检查：拒绝路径穿越和空字节
@@ -310,6 +311,13 @@ async fn main() -> anyhow::Result<()> {
                 let canonical = match tokio::fs::canonicalize(&file_path).await {
                     Ok(p) => p,
                     Err(_) => {
+                        // 资产缺失必须真 404——回退成 index.html 会让 JS 加载到 HTML 而白屏
+                        if path.starts_with("/assets/") {
+                            return Ok(axum::response::Response::builder()
+                                .status(404)
+                                .body(axum::body::Body::from("Not Found"))
+                                .unwrap());
+                        }
                         // 文件不存在，返回 index.html（SPA 路由）
                         // index.html 禁止缓存：引用带哈希的资产名，缓存旧版会导致白屏
                         return Ok(axum::response::Response::builder()
