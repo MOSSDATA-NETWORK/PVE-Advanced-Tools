@@ -347,13 +347,26 @@ async fn run_job(state: &Arc<AppState>, job_id: i64) -> anyhow::Result<()> {
         }
 
         set_step_running(&state.db, step.id).await;
-        let exec = crate::deploy::ssh_exec_kh(
-            &host.host, host.port as u16, &host.username, &auth, &step.command, kh,
-        );
-        let result = tokio::time::timeout(
+        let mut result = tokio::time::timeout(
             tokio::time::Duration::from_secs(signed.timeout_secs as u64),
-            exec,
+            crate::deploy::ssh_exec_kh(
+                &host.host, host.port as u16, &host.username, &auth, &step.command, kh,
+            ),
         ).await;
+
+        // 传输层瞬时失败（节点 sshd 限流等）：可安全重跑的步骤延迟 10s 重试一次
+        if let Ok(Err(e)) = &result {
+            if step.rerun_safe && crate::deploy::is_transport_error(&e.to_string()) {
+                tracing::warn!("任务 {} 步骤「{}」传输错误，10s 后重试一次: {}", job_id, step.name, e);
+                tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+                result = tokio::time::timeout(
+                    tokio::time::Duration::from_secs(signed.timeout_secs as u64),
+                    crate::deploy::ssh_exec_kh(
+                        &host.host, host.port as u16, &host.username, &auth, &step.command, kh,
+                    ),
+                ).await;
+            }
+        }
 
         match result {
             Ok(Ok(output)) => {

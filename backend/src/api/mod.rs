@@ -12,6 +12,7 @@ pub mod passkey;
 pub mod qos;
 pub mod results;
 pub mod scans;
+pub mod settings;
 pub mod signatures;
 pub mod version;
 pub mod vmqos;
@@ -112,6 +113,7 @@ pub fn routes(state: Arc<AppState>) -> Router {
         .route("/alerts/rules/{id}/toggle", post(alerts::toggle_rule))
         .route("/alerts/history", get(alerts::history))
         .route("/inspect/settings", get(alerts::get_inspect_settings).put(alerts::put_inspect_settings))
+        .route("/settings", get(settings::get).put(settings::put))
         .route("/inspect/{host_id}", post(alerts::inspect_now))
         .route("/signatures", get(signatures::list).post(signatures::create))
         .route("/signatures/{id}", axum::routing::delete(signatures::delete))

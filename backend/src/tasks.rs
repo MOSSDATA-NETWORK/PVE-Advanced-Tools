@@ -357,6 +357,28 @@ async fn arp_files_cmd(state: &Arc<AppState>, host_id: i64) -> anyhow::Result<St
 
 /// 任务成功后回写组件状态（在 jobs.rs 成功路径调用）
 pub async fn post_job_hook(state: &Arc<AppState>, job: &crate::jobs::Job) -> anyhow::Result<()> {
+    // ARP 统计回采：解析 ARPSTATS 行入库（只留最近 200 条/主机）
+    if job.kind == "arpfilter.stats" {
+        let out: Option<String> = sqlx::query_scalar(
+            "SELECT output FROM job_steps WHERE job_id=? AND output LIKE '%ARPSTATS:%' ORDER BY seq DESC LIMIT 1"
+        ).bind(job.id).fetch_optional(&state.db).await?;
+        if let Some(out) = out {
+            if let Some(line) = out.lines().find(|l| l.starts_with("ARPSTATS:")) {
+                let payload = &line["ARPSTATS:".len()..];
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(payload) {
+                    if v.get("ok").and_then(|x| x.as_bool()) == Some(true) {
+                        let vm = v.get("vm_drops").cloned().unwrap_or(json!({})).to_string();
+                        let bpdu = v.get("bpdu_drops").and_then(|x| x.as_i64()).unwrap_or(0);
+                        sqlx::query("INSERT INTO arp_stats (host_id, vm_drops, bpdu_drops) VALUES (?, ?, ?)")
+                            .bind(job.host_id).bind(vm).bind(bpdu).execute(&state.db).await?;
+                        sqlx::query("DELETE FROM arp_stats WHERE host_id=? AND id NOT IN (SELECT id FROM arp_stats WHERE host_id=? ORDER BY id DESC LIMIT 200)")
+                            .bind(job.host_id).bind(job.host_id).execute(&state.db).await?;
+                    }
+                }
+            }
+        }
+    }
+
     let (component, installed) = match job.kind.as_str() {
         "netguard.install" | "netguard.apply" => ("netguard", true),
         "netguard.uninstall" => ("netguard", false),
@@ -413,28 +435,6 @@ pub async fn post_job_hook(state: &Arc<AppState>, job: &crate::jobs::Job) -> any
     if job.kind == "qos.config_apply" || job.kind == "qos.install" {
         crate::qos::revoke_retiring(&state.db, job.host_id).await?;
     }
-    // ARP 统计回采：解析 ARPSTATS 行入库（只留最近 200 条/主机）
-    if job.kind == "arpfilter.stats" {
-        let out: Option<String> = sqlx::query_scalar(
-            "SELECT output FROM job_steps WHERE job_id=? AND output LIKE '%ARPSTATS:%' ORDER BY seq DESC LIMIT 1"
-        ).bind(job.id).fetch_optional(&state.db).await?;
-        if let Some(out) = out {
-            if let Some(line) = out.lines().find(|l| l.starts_with("ARPSTATS:")) {
-                let payload = &line["ARPSTATS:".len()..];
-                if let Ok(v) = serde_json::from_str::<serde_json::Value>(payload) {
-                    if v.get("ok").and_then(|x| x.as_bool()) == Some(true) {
-                        let vm = v.get("vm_drops").cloned().unwrap_or(json!({})).to_string();
-                        let bpdu = v.get("bpdu_drops").and_then(|x| x.as_i64()).unwrap_or(0);
-                        sqlx::query("INSERT INTO arp_stats (host_id, vm_drops, bpdu_drops) VALUES (?, ?, ?)")
-                            .bind(job.host_id).bind(vm).bind(bpdu).execute(&state.db).await?;
-                        sqlx::query("DELETE FROM arp_stats WHERE host_id=? AND id NOT IN (SELECT id FROM arp_stats WHERE host_id=? ORDER BY id DESC LIMIT 200)")
-                            .bind(job.host_id).bind(job.host_id).execute(&state.db).await?;
-                    }
-                }
-            }
-        }
-    }
-
     // 卸载成功 = 节点接入凭据全部作废（token 不再可用）
     if job.kind == "qos.uninstall" {
         sqlx::query("UPDATE qos_tokens SET status='revoked' WHERE host_id=? AND status != 'revoked'")

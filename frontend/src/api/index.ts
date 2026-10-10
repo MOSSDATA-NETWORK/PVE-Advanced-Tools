@@ -156,3 +156,8 @@ export const arpStatsApi = {
   list: (hostId: number) => api.get(`/arp/stats/${hostId}`).then(r => r.data),
   collect: (hostId: number) => api.post(`/arp/stats/${hostId}`).then(r => r.data),
 }
+
+export const settingsApi = {
+  get: () => api.get('/settings').then(r => r.data),
+  put: (key: string, value: string) => api.put('/settings', { key, value }).then(r => r.data),
+}

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import {ref, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { notificationsApi, versionApi, passkeyApi } from '../api'
+import {notificationsApi, versionApi, passkeyApi, settingsApi } from '../api'
 import { registerPasskey, isWebAuthnSupported } from '../passkey'
 import axios from 'axios'
 import { generateQrDataUrl } from '../qr'
@@ -9,6 +9,17 @@ import { formatTime } from '../time'
 
 
 const route = useRoute()
+const platformUrl = ref('')
+async function loadPlatformSettings() {
+  const res = await settingsApi.get()
+  if (res.ok) platformUrl.value = res.data.platform_public_url || ''
+}
+async function savePlatformUrl() {
+  const res = await settingsApi.put('platform_public_url', platformUrl.value.trim())
+  if (res.ok) alert('平台地址已保存')
+  else alert(res.error || '保存失败')
+}
+
 const tab = ref<string>((route.query.tab as string) || 'account')
 watch(() => route.query.tab, t => { if (t) tab.value = t as string })
 
@@ -51,6 +62,7 @@ const passkeyLoading = ref(false)
 const passkeyRegistered = ref(false)
 
 onMounted(async () => {
+  loadPlatformSettings()
   loadNotifications()
   loadVersion()
   passkeySupported.value = isWebAuthnSupported()
@@ -417,7 +429,19 @@ async function deletePasskey() {
     </div>
 
     <!-- Version Card -->
-    <div class="card" v-if="tab === 'about'" style="margin-bottom: 16px;">
+        <div class="card" style="margin-bottom: 16px;">
+      <h3 style="margin: 0 0 12px; font-size: 16px;">平台设置</h3>
+      <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+        <label style="font-size: 14px; color: var(--text-secondary);">节点可达的平台地址（platform_public_url）</label>
+        <input class="form-input" v-model="platformUrl" placeholder="https://panel.example.com" style="width: 320px;" />
+        <button class="btn btn-primary" @click="savePlatformUrl">保存</button>
+      </div>
+      <p style="font-size: 13px; color: var(--text-secondary); margin-top: 8px;">
+        下发 vmqos 配置前必填；节点将通过该地址拉取快照与上报限速事件。
+      </p>
+    </div>
+
+<div class="card" v-if="tab === 'about'" style="margin-bottom: 16px;">
       <div class="card-header">
         <h3 id="about">版本信息</h3>
       </div>

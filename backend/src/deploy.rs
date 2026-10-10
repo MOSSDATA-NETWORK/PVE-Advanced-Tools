@@ -32,6 +32,15 @@ impl SshAuth {
     }
 }
 
+/// SSH 传输层错误判定（连接拒绝/超时/认证被拒/255）：节点 sshd 限流等瞬时抖动可重试
+pub fn is_transport_error(msg: &str) -> bool {
+    msg.contains("Some(255)")
+        || msg.contains("Connection refused")
+        || msg.contains("Connection timed out")
+        || msg.contains("Permission denied")
+        || msg.contains("Connection reset")
+}
+
 /// 临时文件守卫：作用域结束自动删除（覆盖错误路径不清理的问题）
 struct TempFileGuard(String);
 
