@@ -27,6 +27,19 @@ pub async fn get(State(state): State<Arc<AppState>>, Path(id): Path<i64>) -> Jso
     }
 }
 
+/// 主机组件安装状态（host_components ��细，主机详情页用）
+pub async fn components(State(state): State<Arc<AppState>>, Path(id): Path<i64>) -> Json<Value> {
+    let rows = sqlx::query_as::<_, (String, String, Option<String>, Option<String>)>(
+        "SELECT component, status, detail, updated_at FROM host_components WHERE host_id=? ORDER BY component"
+    ).bind(id).fetch_all(&state.db).await;
+    match rows {
+        Ok(r) => Json(json!({"ok": true, "data": r.iter().map(|(c, st, d, t)| json!({
+            "component": c, "status": st, "detail": d, "updated_at": t
+        })).collect::<Vec<_>>()})),
+        Err(e) => Json(json!({"ok": false, "error": e.to_string()})),
+    }
+}
+
 /// 添加主机：保存凭据后抓取 SSH 主机密钥指纹，待用户确认后才允许部署与执行任务
 pub async fn create(State(state): State<Arc<AppState>>, jar: CookieJar, Json(body): Json<db::CreateHost>) -> Json<Value> {
     let actor = crate::audit::actor_from_cookie(&state.db, &jar).await;

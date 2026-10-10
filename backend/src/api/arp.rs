@@ -245,3 +245,31 @@ pub async fn sync(State(state): State<Arc<AppState>>, jar: CookieJar, Path(host_
         Err(e) => Json(json!({"ok": false, "error": e.to_string()})),
     }
 }
+
+/// 触发指定主机的效果统计采集（异步任务，回采后自动入库）
+pub async fn stats_collect(State(state): State<Arc<AppState>>, jar: CookieJar, Path(host_id): Path<i64>) -> Json<Value> {
+    let actor = crate::audit::actor_from_cookie(&state.db, &jar).await;
+    let mode: Option<(String,)> = sqlx::query_as("SELECT mode FROM arp_mode WHERE host_id=?")
+        .bind(host_id).fetch_optional(&state.db).await.unwrap_or(None);
+    let Some((mode,)) = mode else {
+        return Json(json!({"ok": false, "error": "该主机未安装 arpfilter"}));
+    };
+    match crate::jobs::create_and_enqueue(&state, host_id, crate::tasks::arpfilter_stats(&mode), &actor).await {
+        Ok(id) => Json(json!({"ok": true, "job_id": id})),
+        Err(e) => Json(json!({"ok": false, "error": e.to_string()})),
+    }
+}
+
+/// 统计样本查询（默认每主机最近 20 条）
+pub async fn stats_list(State(state): State<Arc<AppState>>, Path(host_id): Path<i64>) -> Json<Value> {
+    let rows = sqlx::query_as::<_, (i64, String, i64, Option<String>)>(
+        "SELECT id, vm_drops, bpdu_drops, collected_at FROM arp_stats WHERE host_id=? ORDER BY id DESC LIMIT 20"
+    ).bind(host_id).fetch_all(&state.db).await;
+    match rows {
+        Ok(r) => Json(json!({"ok": true, "data": r.iter().map(|(id, vm, bpdu, at)| json!({
+            "id": id, "vm_drops": serde_json::from_str::<Value>(vm).unwrap_or(json!({})),
+            "bpdu_drops": bpdu, "collected_at": at
+        })).collect::<Vec<_>>()})),
+        Err(e) => Json(json!({"ok": false, "error": e.to_string()})),
+    }
+}

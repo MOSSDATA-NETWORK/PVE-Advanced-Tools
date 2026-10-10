@@ -29,6 +29,7 @@ const navGroups: NavGroup[] = [
     children: [
       { label: '扫描任务', path: '/scans' },
       { label: '检测结果', path: '/results' },
+      { label: '特征库管理', path: '/signatures' },
     ],
   },
   {
@@ -45,6 +46,7 @@ const navGroups: NavGroup[] = [
     children: [
       { label: '运行模式', path: '/arp#mode' },
       { label: '白名单管理', path: '/arp' },
+      { label: '效果统计', path: '/arp#stats' },
     ],
   },
   {
@@ -89,7 +91,7 @@ const activeGroup = computed(() => {
   const p = route.path
   if (p === '/') return 'dashboard'
   if (p.startsWith('/hosts') || p.startsWith('/jobs')) return 'hosts'
-  if (p.startsWith('/scans') || p.startsWith('/results')) return 'detect'
+  if (p.startsWith('/scans') || p.startsWith('/results') || p.startsWith('/signatures')) return 'detect'
   for (const g of navGroups) {
     if (g.children && p.startsWith('/' + g.name)) return g.name
   }

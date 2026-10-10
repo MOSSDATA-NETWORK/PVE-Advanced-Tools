@@ -171,13 +171,13 @@ def build_nft(model):
             # 映射文件过期/未更新时合法 ARP 靠重传大概率能到达；
             # 不是绝对保证——噪声打满限速器时单个 ARP 仍可能被丢
             # （bridge 族里裸 arp 后不能直接接 limit，必须带具体字段匹配）
-            lines.append("    arp htype 1 arp ptype ip limit rate over 5/second burst 10 packets drop")
-            lines.append("    ether type 8021q arp htype 1 arp ptype ip limit rate over 5/second burst 10 packets drop")
+            lines.append("    arp htype 1 arp ptype ip limit rate over 5/second burst 10 packets counter drop")
+            lines.append("    ether type 8021q arp htype 1 arp ptype ip limit rate over 5/second burst 10 packets counter drop")
             lines.append("  }")
     lines.append("  chain main {")
     lines.append("    type filter hook forward priority 0; policy accept;")
     # STP BPDU 对 VM 永远无用，所有 tap 口统一丢弃
-    lines.append(f'    oifname "tap*" ether daddr {BPDU_MAC} drop')
+    lines.append(f'    oifname "tap*" ether daddr {BPDU_MAC} counter drop')
     if model:
         lines.append("    oifname vmap @jump4vm")
     lines.append("  }")
@@ -225,8 +225,8 @@ def live_table_matches(model):
         for rule in (                       # 四条规则全文逐字核对（含 rate/burst）
                 f"arp daddr ip @{chain}_ips return",
                 f"ether type 8021q arp daddr ip @{chain}_ips return",
-                "arp htype 1 arp ptype ip limit rate over 5/second burst 10 packets drop",
-                "ether type 8021q arp htype 1 arp ptype ip limit rate over 5/second burst 10 packets drop"):
+                "arp htype 1 arp ptype ip limit rate over 5/second burst 10 packets counter drop",
+                "ether type 8021q arp htype 1 arp ptype ip limit rate over 5/second burst 10 packets counter drop"):
             if rule not in clines:
                 return False
         sblk = _nft_block(live, "set", f"{chain}_ips")
@@ -308,6 +308,39 @@ def run_daemon():
     print(f"{SCRIPT_NAME}: stopped", flush=True)
 
 
+def stats():
+    """输出各链丢弃计数 JSON（ARPSTATS:{...} 单行，供平台任务解析）。
+    计数器随规则表重建清零（apply/reconcile 会重建），语义为「最近一次应用以来」。"""
+    import json as _json
+    r = subprocess.run(["nft", "-j", "list", "table", "bridge", NFT_TABLE],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        print("ARPSTATS:" + _json.dumps({"ok": False, "error": "nft 表不存在（未安装或未应用）"}))
+        return 0
+    try:
+        data = _json.loads(r.stdout)
+    except ValueError:
+        print("ARPSTATS:" + _json.dumps({"ok": False, "error": "nft 输出解析失败"}))
+        return 0
+    chains = {}
+    bpdu = 0
+    for item in data.get("nftables", []):
+        rule = item.get("rule")
+        if not rule:
+            continue
+        chain = rule.get("chain", "?")
+        for expr in rule.get("expr", []):
+            c = expr.get("counter")
+            if not c:
+                continue
+            pkts = c.get("packets", 0)
+            if chain == "main":
+                bpdu += pkts
+            else:
+                chains[chain] = chains.get(chain, 0) + pkts
+    print("ARPSTATS:" + _json.dumps({"ok": True, "vm_drops": chains, "bpdu_drops": bpdu}))
+    return 0
+
 def status():
     maps = read_mapfiles()
     print(f"映射文件: {len(maps)} 个 NIC，IP 条目: {sum(len(v) for v in maps.values())}")
@@ -380,6 +413,8 @@ def main():
         print(f"已调和，{n} 个 NIC 装规则")
     elif cmd == "status":
         status()
+    elif cmd == "stats":
+        stats()
     elif cmd == "install":
         install()
     elif cmd == "uninstall":

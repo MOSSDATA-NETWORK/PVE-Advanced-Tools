@@ -9,6 +9,7 @@ export const hostsApi = {
   update: (id: number, data: any) => api.put(`/hosts/${id}`, data).then(r => r.data),
   delete: (id: number) => api.delete(`/hosts/${id}`).then(r => r.data),
   test: (id: number) => api.post(`/hosts/${id}/test`).then(r => r.data),
+  components: (id: number) => api.get(`/hosts/${id}/components`).then(r => r.data),
   deploy: (id: number) => api.post(`/hosts/${id}/deploy`).then(r => r.data),
 }
 
@@ -94,6 +95,9 @@ export const netguardApi = {
   addWhitelist: (data: any) => api.post('/netguard/whitelist', data).then(r => r.data),
   delWhitelist: (id: number) => api.delete(`/netguard/whitelist/${id}`).then(r => r.data),
   deploy: () => api.post('/netguard/deploy').then(r => r.data),
+  logs: (hostId: number) => api.post(`/netguard/logs/${hostId}`).then(r => r.data),
+  getLogEnabled: () => api.get('/netguard/log-enabled').then(r => r.data),
+  setLogEnabled: (enabled: boolean) => api.post('/netguard/log-enabled', { enabled }).then(r => r.data),
 }
 
 export const arpApi = {
@@ -132,4 +136,23 @@ export const qosApi = {
 
 export const dashboardApi = {
   overview: () => api.get('/dashboard').then(r => r.data),
+}
+
+export const optimizeApi = {
+  init: (hostId: number) => api.post(`/optimize/init/${hostId}`).then(r => r.data),
+  tune: (hostId: number) => api.post(`/optimize/tune/${hostId}`).then(r => r.data),
+  rollback: (hostId: number, component: string) => api.post(`/optimize/rollback/${hostId}`, { component }).then(r => r.data),
+}
+
+export const signaturesApi = {
+  list: () => api.get('/signatures').then(r => r.data),
+  create: (data: any) => api.post('/signatures', data).then(r => r.data),
+  toggle: (id: number) => api.post(`/signatures/${id}/toggle`).then(r => r.data),
+  del: (id: number) => api.delete(`/signatures/${id}`).then(r => r.data),
+  push: (hostId: number) => api.post(`/signatures/push/${hostId}`).then(r => r.data),
+}
+
+export const arpStatsApi = {
+  list: (hostId: number) => api.get(`/arp/stats/${hostId}`).then(r => r.data),
+  collect: (hostId: number) => api.post(`/arp/stats/${hostId}`).then(r => r.data),
 }

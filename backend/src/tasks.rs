@@ -40,6 +40,8 @@ fn step(name: &str, command: String, rollback: Option<String>) -> StepSpec {
 
 /// 从 DB 组装一台主机的 /etc/vm-netguard.conf 内容
 async fn netguard_conf(pool: &SqlitePool, host_id: i64) -> anyhow::Result<String> {
+    let log_enabled = get_setting(pool, "netguard_log_enabled").await
+        .map(|v| v == "1" || v == "true").unwrap_or(false);
     let ports: Vec<(String,)> = sqlx::query_as("SELECT ports FROM netguard_ports WHERE enabled = 1 ORDER BY id")
         .fetch_all(pool).await?;
     let domains: Vec<(String,)> = sqlx::query_as("SELECT domain FROM netguard_domains WHERE enabled = 1 ORDER BY id")
@@ -59,8 +61,8 @@ async fn netguard_conf(pool: &SqlitePool, host_id: i64) -> anyhow::Result<String
     let wl = whitelist.iter().map(|w| w.0.to_string()).collect::<Vec<_>>().join(" ");
 
     Ok(format!(
-        "# 由 PVE-Advanced-Tools 平台生成，请勿手工编辑\nBLOCK_DOMAINS=\"{}\"\nDROP_PORTS=\"{}\"\nWHITELIST_VMIDS=\"{}\"\n",
-        block_domains, drop_ports, wl
+        "# 由 PVE-Advanced-Tools 平台生成，请勿手工编辑\nBLOCK_DOMAINS=\"{}\"\nDROP_PORTS=\"{}\"\nWHITELIST_VMIDS=\"{}\"\nENABLE_LOG=\"{}\"\n",
+        block_domains, drop_ports, wl, if log_enabled { "1" } else { "0" }
     ))
 }
 
@@ -131,6 +133,53 @@ pub fn netguard_uninstall() -> JobSpec {
         queue_ttl_secs: 1800,
         steps: vec![step("卸载 netguard", "/usr/local/sbin/vm-netguard.sh uninstall".into(), None)],
     }
+}
+
+/// 拉取节点拦截日志（需 ENABLE_LOG=1 并重新下发配置后产生记录）
+pub fn netguard_logs() -> JobSpec {
+    JobSpec {
+        kind: "netguard.logs".into(),
+        failure_policy: POLICY_FAIL_OPEN.into(),
+        timeout_secs: 60,
+        queue_ttl_secs: 600,
+        steps: vec![step("读取拦截日志", "/usr/local/sbin/vm-netguard.sh logs".into(), None)],
+    }
+}
+
+/// ARP 效果统计回采（输出 ARPSTATS:{json} 行，post_job_hook 解析入 arp_stats）
+pub fn arpfilter_stats(mode: &str) -> JobSpec {
+    let dest = if mode == "static" { "/usr/local/sbin/pve-arpfilter-static.py" } else { "/usr/local/sbin/pve-arpfilter.py" };
+    JobSpec {
+        kind: "arpfilter.stats".into(),
+        failure_policy: POLICY_FAIL_OPEN.into(),
+        timeout_secs: 60,
+        queue_ttl_secs: 600,
+        steps: vec![step("采集丢弃计数", format!("{} stats", dest), None)],
+    }
+}
+
+/// 切鸡特征库下发（/etc/chicken-signatures.conf，chicken-check.sh 运行时读取）
+pub async fn detect_push_signatures(state: &Arc<AppState>, host_id: i64) -> anyhow::Result<JobSpec> {
+    let rows: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT sig_type, value, name FROM detect_signatures WHERE enabled = 1 ORDER BY id"
+    ).fetch_all(&state.db).await?;
+    // 字符白名单在脚本侧还有一道；这里先拦掉明显非法的
+    let mut lines = String::from("# 由 PVE-Advanced-Tools 平台下发，请勿手工编辑\n");
+    for (t, v, n) in &rows {
+        let ok = |x: &str| !x.is_empty() && x.chars().all(|c| c.is_ascii_alphanumeric() || ".-_/~:".contains(c));
+        if ok(v) && ok(n) {
+            lines.push_str(&format!("{}|{}|{}\n", t, v, n));
+        }
+    }
+    Ok(JobSpec {
+        kind: "detect.signatures".into(),
+        failure_policy: POLICY_FAIL_OPEN.into(),
+        timeout_secs: 60,
+        queue_ttl_secs: 600,
+        steps: vec![step("下发特征库",
+            format!("echo '{}' | base64 -d > /etc/chicken-signatures.conf.tmp && chmod 644 /etc/chicken-signatures.conf.tmp && mv /etc/chicken-signatures.conf.tmp /etc/chicken-signatures.conf", b64(&lines)),
+            None)],
+    })
 }
 
 pub fn netguard_status() -> JobSpec {
@@ -364,6 +413,28 @@ pub async fn post_job_hook(state: &Arc<AppState>, job: &crate::jobs::Job) -> any
     if job.kind == "qos.config_apply" || job.kind == "qos.install" {
         crate::qos::revoke_retiring(&state.db, job.host_id).await?;
     }
+    // ARP 统计回采：解析 ARPSTATS 行入库（只留最近 200 条/主机）
+    if job.kind == "arpfilter.stats" {
+        let out: Option<String> = sqlx::query_scalar(
+            "SELECT output FROM job_steps WHERE job_id=? AND output LIKE '%ARPSTATS:%' ORDER BY seq DESC LIMIT 1"
+        ).bind(job.id).fetch_optional(&state.db).await?;
+        if let Some(out) = out {
+            if let Some(line) = out.lines().find(|l| l.starts_with("ARPSTATS:")) {
+                let payload = &line["ARPSTATS:".len()..];
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(payload) {
+                    if v.get("ok").and_then(|x| x.as_bool()) == Some(true) {
+                        let vm = v.get("vm_drops").cloned().unwrap_or(json!({})).to_string();
+                        let bpdu = v.get("bpdu_drops").and_then(|x| x.as_i64()).unwrap_or(0);
+                        sqlx::query("INSERT INTO arp_stats (host_id, vm_drops, bpdu_drops) VALUES (?, ?, ?)")
+                            .bind(job.host_id).bind(vm).bind(bpdu).execute(&state.db).await?;
+                        sqlx::query("DELETE FROM arp_stats WHERE host_id=? AND id NOT IN (SELECT id FROM arp_stats WHERE host_id=? ORDER BY id DESC LIMIT 200)")
+                            .bind(job.host_id).bind(job.host_id).execute(&state.db).await?;
+                    }
+                }
+            }
+        }
+    }
+
     // 卸载成功 = 节点接入凭据全部作废（token 不再可用）
     if job.kind == "qos.uninstall" {
         sqlx::query("UPDATE qos_tokens SET status='revoked' WHERE host_id=? AND status != 'revoked'")

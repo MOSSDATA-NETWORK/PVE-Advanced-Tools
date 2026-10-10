@@ -317,6 +317,38 @@ pub async fn deploy(State(state): State<Arc<AppState>>, jar: CookieJar) -> Json<
     Json(json!({"ok": true, "jobs": jobs_created}))
 }
 
+/// 拉取指定主机的拦截日志（异步任务，前端轮询任务结果）
+pub async fn logs(State(state): State<Arc<AppState>>, jar: CookieJar, Path(host_id): Path<i64>) -> Json<Value> {
+    let actor = crate::audit::actor_from_cookie(&state.db, &jar).await;
+    match crate::jobs::create_and_enqueue(&state, host_id, crate::tasks::netguard_logs(), &actor).await {
+        Ok(id) => Json(json!({"ok": true, "job_id": id})),
+        Err(e) => Json(json!({"ok": false, "error": e.to_string()})),
+    }
+}
+
+/// 拦截日志开关（写入 settings，下次下发配置生效）
+#[derive(Deserialize)]
+pub struct LogToggle { pub enabled: bool }
+
+pub async fn set_log_enabled(State(state): State<Arc<AppState>>, jar: CookieJar, Json(body): Json<LogToggle>) -> Json<Value> {
+    let v = if body.enabled { "1" } else { "0" };
+    let r = sqlx::query(
+        "INSERT INTO settings (key, value) VALUES ('netguard_log_enabled', ?)          ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+    ).bind(v).execute(&state.db).await;
+    let actor = crate::audit::actor_from_cookie(&state.db, &jar).await;
+    crate::audit::log(&state.db, &actor, "netguard.log.toggle", None, None, Some(if body.enabled { "开启" } else { "关闭" }), None).await;
+    match r {
+        Ok(_) => Json(json!({"ok": true, "note": "已保存，重新下发配置后生效"})),
+        Err(e) => Json(json!({"ok": false, "error": e.to_string()})),
+    }
+}
+
+pub async fn get_log_enabled(State(state): State<Arc<AppState>>) -> Json<Value> {
+    let v: Option<String> = sqlx::query_scalar("SELECT value FROM settings WHERE key='netguard_log_enabled'")
+        .fetch_optional(&state.db).await.unwrap_or(None);
+    Json(json!({"ok": true, "enabled": v.as_deref() == Some("1") || v.as_deref() == Some("true")}))
+}
+
 /// 各主机 netguard 状态（组件表 + 最近一次状态任务输出）
 pub async fn status(State(state): State<Arc<AppState>>) -> Json<Value> {
     match crate::tasks::component_map(&state.db).await {

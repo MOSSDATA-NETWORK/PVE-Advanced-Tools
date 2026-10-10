@@ -44,12 +44,13 @@ async fn run_migrations(pool: &sqlx::SqlitePool) -> anyhow::Result<()> {
         .execute(pool)
         .await?;
 
-    let migrations: [(&str, &str); 5] = [
+    let migrations: [(&str, &str); 6] = [
         ("001_init", include_str!("../migrations/001_init.sql")),
         ("002_p0", include_str!("../migrations/002_p0.sql")),
         ("003_p1", include_str!("../migrations/003_p1.sql")),
         ("004_p4", include_str!("../migrations/004_p4.sql")),
         ("005_p3", include_str!("../migrations/005_p3.sql")),
+        ("006_extras", include_str!("../migrations/006_extras.sql")),
     ];
 
     for (name, sql) in migrations {

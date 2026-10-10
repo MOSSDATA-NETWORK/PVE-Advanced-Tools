@@ -24,7 +24,9 @@ const router = createRouter({
       children: [
         { path: '', name: 'dashboard', component: () => import('./views/Dashboard.vue') },
         { path: 'hosts', name: 'hosts', component: () => import('./views/Hosts.vue') },
+        { path: 'hosts/:id', name: 'host-detail', component: () => import('./views/HostDetail.vue') },
         { path: 'scans', name: 'scans', component: () => import('./views/Scans.vue') },
+        { path: 'signatures', name: 'signatures', component: () => import('./views/Signatures.vue') },
         { path: 'results', name: 'results', component: () => import('./views/Results.vue') },
         { path: 'jobs', name: 'jobs', component: () => import('./views/Jobs.vue') },
         { path: 'netguard', name: 'netguard', component: () => import('./views/Netguard.vue') },

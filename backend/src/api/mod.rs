@@ -12,6 +12,7 @@ pub mod passkey;
 pub mod qos;
 pub mod results;
 pub mod scans;
+pub mod signatures;
 pub mod version;
 pub mod vmqos;
 pub mod vms;
@@ -49,6 +50,7 @@ pub fn routes(state: Arc<AppState>) -> Router {
         .route("/hosts/{id}/hostkey/scan", post(hosts::hostkey_scan))
         .route("/hosts/{id}/hostkey/confirm", post(hosts::hostkey_confirm))
         .route("/hosts/{id}/probe", post(hosts::probe))
+        .route("/hosts/{id}/components", get(hosts::components))
         .route("/hosts/{id}/vms", get(vms::list))
         .route("/hosts/{id}/vms/sync", post(vms::sync))
         .route("/hosts/{id}/vm-events", get(vms::events))
@@ -70,6 +72,8 @@ pub fn routes(state: Arc<AppState>) -> Router {
         .route("/netguard/whitelist/{id}", axum::routing::delete(netguard::del_whitelist))
         .route("/netguard/deploy", post(netguard::deploy))
         .route("/netguard/status", get(netguard::status))
+        .route("/netguard/logs/{host_id}", post(netguard::logs))
+        .route("/netguard/log-enabled", get(netguard::get_log_enabled).post(netguard::set_log_enabled))
         .route("/arp/modes", get(arp::list_modes))
         .route("/arp/mode/{host_id}", post(arp::set_mode))
         .route("/arp/uninstall/{host_id}", post(arp::uninstall))
@@ -81,6 +85,7 @@ pub fn routes(state: Arc<AppState>) -> Router {
         .route("/arp/maps/import", post(arp::map_import))
         .route("/arp/maps/{id}", axum::routing::delete(arp::map_del))
         .route("/arp/maps/{host_id}/list", get(arp::map_list))
+        .route("/arp/stats/{host_id}", get(arp::stats_list).post(arp::stats_collect))
         .route("/optimize/init/{host_id}", post(optimize::init))
         .route("/optimize/upgrade/{host_id}", post(optimize::upgrade))
         .route("/optimize/batch", post(optimize::batch))
@@ -108,6 +113,10 @@ pub fn routes(state: Arc<AppState>) -> Router {
         .route("/alerts/history", get(alerts::history))
         .route("/inspect/settings", get(alerts::get_inspect_settings).put(alerts::put_inspect_settings))
         .route("/inspect/{host_id}", post(alerts::inspect_now))
+        .route("/signatures", get(signatures::list).post(signatures::create))
+        .route("/signatures/{id}", axum::routing::delete(signatures::delete))
+        .route("/signatures/{id}/toggle", post(signatures::toggle))
+        .route("/signatures/push/{host_id}", post(signatures::push))
         .route("/scans", get(scans::list).post(scans::create))
         .route("/scans/{id}", get(scans::get))
         .route("/scans/{id}/stop", post(scans::stop))

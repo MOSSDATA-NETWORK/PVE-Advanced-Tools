@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { hostsApi, scansApi, hostkeyApi, vmsApi } from '../api'
 
+const route = useRoute()
 const hosts = ref<any[]>([])
 const loading = ref(true)
 const showModal = ref(false)
@@ -14,7 +16,10 @@ const testing = ref<number | null>(null)
 const scanning = ref(false)
 const deploying = ref<number | null>(null)
 
-onMounted(loadHosts)
+onMounted(() => {
+  loadHosts()
+  if (route.hash === '#add') openAdd()
+})
 
 async function loadHosts() {
   loading.value = true
@@ -259,7 +264,9 @@ function clearKey() {
           </thead>
           <tbody>
             <tr v-for="h in hosts" :key="h.id">
-              <td style="font-weight: 600;">{{ h.name }}</td>
+              <td style="font-weight: 600;">
+                <router-link :to="'/hosts/' + h.id" style="color: inherit; text-decoration: none;">{{ h.name }}</router-link>
+              </td>
               <td><code style="font-size: 13px;">{{ h.host }}:{{ h.port }}</code></td>
               <td>{{ authTypeLabel(h.auth_type) }}</td>
               <td><span :class="['badge', `badge-${h.status}`]">{{ h.status }}</span></td>

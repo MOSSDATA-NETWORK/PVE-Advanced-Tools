@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
-import { netguardApi, hostsApi } from '../api'
+import { netguardApi, hostsApi, jobsApi } from '../api'
 
 const ports = ref<any[]>([])
 const domains = ref<any[]>([])
@@ -15,6 +15,10 @@ const newPort = ref({ name: '', ports: '' })
 const newDomain = ref('')
 const importText = ref('')
 const showImport = ref(false)
+const logEnabled = ref(false)
+const logHost = ref<number | null>(null)
+const logOutput = ref('')
+const logLoading = ref(false)
 const newWl = ref<{ host_id: number | null; vmid: string }>({ host_id: null, vmid: '' })
 
 const hostMap = computed(() => {
@@ -28,9 +32,9 @@ onMounted(loadAll)
 async function loadAll() {
   loading.value = true
   try {
-    const [p, d, h, s, st] = await Promise.all([
+    const [p, d, h, s, st, lg] = await Promise.all([
       netguardApi.listPorts(), netguardApi.listDomains(), hostsApi.list(),
-      netguardApi.getScope(), api200('/netguard/status'),
+      netguardApi.getScope(), api200('/netguard/status'), netguardApi.getLogEnabled(),
     ])
     if (p.ok) ports.value = p.data
     if (d.ok) domains.value = d.data
@@ -42,6 +46,7 @@ async function loadAll() {
       whitelist.value = s.whitelist
     }
     if (st?.ok) components.value = st.components
+    if ((lg as any)?.ok) logEnabled.value = (lg as any).enabled
   } finally {
     loading.value = false
   }
@@ -111,6 +116,36 @@ function componentBadge(hostId: number) {
   const c = components.value[String(hostId)]?.netguard
   return c ? '已安装' : '未安装'
 }
+
+async function toggleLog() {
+  const res = await netguardApi.setLogEnabled(logEnabled.value)
+  if (res.ok) showNotice(true, '已保存，点「下发到生效主机」后生效')
+  else showNotice(false, res.error)
+}
+
+async function fetchLogs() {
+  if (!logHost.value) { showNotice(false, '请选择主机'); return }
+  logLoading.value = true
+  logOutput.value = ''
+  try {
+    const res = await netguardApi.logs(logHost.value)
+    if (!res.ok) { showNotice(false, res.error); return }
+    const jobId = res.job_id
+    for (let i = 0; i < 40; i++) {
+      await new Promise(r => setTimeout(r, 1500))
+      const j = await jobsApi.get(jobId)
+      if (!j.ok) break
+      const st = j.data.job.status
+      if (['succeeded', 'failed', 'rolled_back', 'rollback_failed', 'abandoned'].includes(st)) {
+        const out = (j.data.steps || []).map((x: any) => x.output || '').join('\n').trim()
+        logOutput.value = out || (st === 'succeeded' ? '（近 2 小时无拦截记录——需开启日志开关并重新下发配置后才有记录）' : `任务${st}`)
+        break
+      }
+    }
+  } finally {
+    logLoading.value = false
+  }
+}
 </script>
 
 <template>
@@ -121,6 +156,45 @@ function componentBadge(hostId: number) {
         <p class="page-subtitle">VM 出网端口封堵与域名拦截（SNI/DNS 双通道，IPv4+IPv6），按宿主机生效</p>
       </div>
       <button class="btn btn-primary" @click="deployAll">下发到生效主机</button>
+    </div>
+
+    <!-- 管控总览 -->
+    <div class="card" id="overview" style="margin-bottom: 16px;">
+      <h3 style="margin: 0 0 12px; font-size: 16px;">管控总览（各节点组件状态）</h3>
+      <table>
+        <thead><tr><th>节点</th><th>组件状态</th><th>明细</th></tr></thead>
+        <tbody>
+          <tr v-for="h in hosts" :key="h.id">
+            <td style="font-weight: 600;">{{ h.name }}</td>
+            <td>
+              <span class="badge" :class="components[h.id]?.netguard ? 'badge-online' : 'badge-unknown'">
+                {{ components[h.id]?.netguard ? '已安装' : '未安装' }}
+              </span>
+            </td>
+            <td style="font-size: 13px; color: var(--text-secondary);">{{ components[h.id]?.netguard?.detail || '—' }}</td>
+          </tr>
+          <tr v-if="!hosts.length"><td colspan="3" style="text-align: center; color: #888;">暂无主机</td></tr>
+        </tbody>
+      </table>
+      <div style="margin-top: 12px;">
+        <label style="display: flex; align-items: center; gap: 8px; font-size: 14px;">
+          <input type="checkbox" v-model="logEnabled" @change="toggleLog" />
+          记录拦截日志（节点内核日志，限速 5 条/分钟；下发配置后生效）
+        </label>
+      </div>
+    </div>
+
+    <!-- 拦截日志 -->
+    <div class="card" id="logs" style="margin-bottom: 16px;">
+      <h3 style="margin: 0 0 12px; font-size: 16px;">拦截日志（近 2 小时内核日志）</h3>
+      <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+        <select class="form-input" v-model="logHost" style="width: 200px;">
+          <option :value="null">选择主机</option>
+          <option v-for="h in hosts" :key="h.id" :value="h.id">{{ h.name }}</option>
+        </select>
+        <button class="btn btn-primary" @click="fetchLogs" :disabled="logLoading">{{ logLoading ? '拉取中…' : '拉取日志' }}</button>
+      </div>
+      <pre v-if="logOutput" style="background: #1e1e1e; color: #d4d4d4; padding: 12px; border-radius: 8px; font-size: 12px; max-height: 320px; overflow: auto; white-space: pre-wrap;">{{ logOutput }}</pre>
     </div>
 
     <div v-if="notice" style="margin-bottom: 16px; padding: 12px 16px; border-radius: 12px;"

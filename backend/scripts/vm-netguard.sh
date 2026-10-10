@@ -28,6 +28,7 @@ CHAIN6="VMNETGUARD6"
 # 默认配置（无配置文件时的兜底；平台下发总是先写配置再 apply）
 BLOCK_DOMAINS=""
 DROP_PORTS=""
+ENABLE_LOG="0"  # 1 = 拦截前写内核日志（前缀 NG_PORT:/NG_DOMAIN:，限速 5/min）
 WHITELIST_VMIDS=""
 [ -f "$CONF_FILE" ] && . "$CONF_FILE"
 
@@ -80,8 +81,11 @@ build_chain() {
     "$bin" -A "$chain" -i "tap${vmid}i+" -j RETURN || return 1
   done
 
-  # 禁 VM 对外 SMTP / BT（静默 DROP）
+  # 禁 VM 对外 SMTP / BT（静默 DROP；ENABLE_LOG=1 时先记日志）
   if [ -n "$DROP_PORTS" ]; then
+    if [ "$ENABLE_LOG" = "1" ]; then
+      "$bin" -A "$chain" -p tcp -m multiport --dports "$DROP_PORTS" -m limit --limit 5/min -j LOG --log-prefix "NG_PORT: " --log-level 6 || return 1
+    fi
     "$bin" -A "$chain" -p tcp -m multiport --dports "$DROP_PORTS" -j DROP || return 1
   fi
 
@@ -90,6 +94,9 @@ build_chain() {
   for d in $BLOCK_DOMAINS; do
     hex=$(domain_to_hex "$d")
     if [ "$bin" = "iptables" ]; then rej="icmp-port-unreachable"; else rej="icmp6-port-unreachable"; fi
+    if [ "$ENABLE_LOG" = "1" ]; then
+      "$bin" -A "$chain" -p tcp --dport 443 -m string --string "$d" --algo bm -m limit --limit 5/min -j LOG --log-prefix "NG_DOMAIN($d): " --log-level 6 || return 1
+    fi
     "$bin" -A "$chain" -p tcp --dport 443 -m string --string "$d" --algo bm -j REJECT --reject-with tcp-reset || return 1
     "$bin" -A "$chain" -p tcp --dport 80 -m string --string "$d" --algo bm -j REJECT --reject-with tcp-reset || return 1
     "$bin" -A "$chain" -p udp --dport 443 -m string --string "$d" --algo bm -j REJECT --reject-with "$rej" || return 1
@@ -218,10 +225,17 @@ do_status() {
     "$svc" "${rules4:-0}" "${rules6:-0}" "${hits4:-0}" "${hits6:-0}" "$BLOCK_DOMAINS" "$DROP_PORTS" "$WHITELIST_VMIDS"
 }
 
+# 最近拦截日志（内核日志中的 NG_* 记录，需 ENABLE_LOG=1 后 apply 过才产生）
+do_logs() {
+  journalctl -k --since '-2 hours' --no-pager 2>/dev/null | grep -E 'NG_PORT:|NG_DOMAIN' | tail -100 && return 0
+  dmesg 2>/dev/null | grep -E 'NG_PORT:|NG_DOMAIN' | tail -100
+}
+
 case "${1:-apply}" in
   apply) apply_rules ;;
   install) do_install; apply_rules ;;
   uninstall) do_uninstall ;;
   status) do_status ;;
-  *) echo "用法: $0 [apply|install|uninstall|status]"; exit 1 ;;
+  logs) do_logs ;;
+  *) echo "用法: $0 [apply|install|uninstall|status|logs]"; exit 1 ;;
 esac

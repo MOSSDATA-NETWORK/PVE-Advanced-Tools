@@ -39,7 +39,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ---- VM 内检测逻辑（base64 编码后经 qm guest exec 传入，避免引号地狱）----
-CHECK_B64=$(cat <<'CHECKEOF' | base64 | tr -d '\n'
+CHECK_SCRIPT=$(cat <<'CHECKEOF'
 found=""
 [ -d /opt/incus ] && found="${found}incus_dir "
 [ -e /usr/local/bin/incushlii-agent ] && found="${found}incushlii_agent "
@@ -80,9 +80,12 @@ net=$(echo "$net_lines" | grep -c .)
 # 8443 只有在 incusd 进程监听时才算特征（其他软件也常用8443，避免误报）
 l8443=$(ss -tlnp 2>/dev/null | grep ':8443' | grep -ci incusd || true)
 [ "${l8443:-0}" -gt 0 ] && found="${found}api_8443 "
+# __CUSTOM_GA__
 [ -n "$found" ] && echo "FOUND:${found}${det}" || echo "CLEAN"
 CHECKEOF
 )
+
+
 
 # 从 qm guest exec 的 JSON 输出中提取 out-data 内容
 extract_out() {
@@ -95,7 +98,16 @@ extract_out() {
 check_vm_ga() {
     local vmid="$1"
     local out
-    out=$(timeout "$GA_TIMEOUT" qm guest exec "$vmid" -- bash -c "echo $CHECK_B64 | base64 -d | bash" 2>/dev/null | extract_out)
+    # 运行时注入自定义特征（函数此时已定义），再 base64 编码
+    local script="$CHECK_SCRIPT"
+    if [ -f "$SIG_CONF" ]; then
+        local extra
+        extra=$(custom_ga_checks)
+        [ -n "$extra" ] && script="${script//# __CUSTOM_GA__/$extra}"
+    fi
+    local b64
+    b64=$(printf '%s' "$script" | base64 | tr -d '\n')
+    out=$(timeout "$GA_TIMEOUT" qm guest exec "$vmid" -- bash -c "echo $b64 | base64 -d | bash" 2>/dev/null | extract_out)
     if echo "$out" | grep -q "FOUND:"; then
         local ev
         ev=$(echo "$out" | sed 's/.*FOUND://; s/[[:space:]]*$//')
@@ -106,6 +118,48 @@ check_vm_ga() {
         # GA在线但exec被禁用/超时（如管理员策略）→ 归为待检测，走磁盘扫描
         echo "needs_disk_scan|ga|ga_exec_disabled"
     fi
+}
+
+# ---- 自定义特征库（/etc/chicken-signatures.conf，平台下发，每行: 类型|值|名称）----
+# 类型: path=文件/目录路径; service=systemd 服务名; history=history 关键词
+# 值与名称做字符白名单清洗，非法行直接跳过
+SIG_CONF="/etc/chicken-signatures.conf"
+
+_sig_clean() {
+    case "$1" in *[!A-Za-z0-9._/~:.-]*|"") return 1;; esac
+    return 0
+}
+
+# 磁盘模式：在挂载点下检查（调用方 check_vm_disk 的局部 found 会被追加——bash 动态作用域）
+custom_disk_checks() {
+    [ -f "$SIG_CONF" ] || return 0
+    local stype svalue sname
+    while IFS='|' read -r stype svalue sname; do
+        case "$stype" in path|service|history) ;; *) continue;; esac
+        _sig_clean "$svalue" || continue
+        _sig_clean "$sname" || sname="custom"
+        case "$stype" in
+            path)    [ -e "$MOUNT_POINT$svalue" ] && found="${found}sigp:${sname} " ;;
+            service) ls "$MOUNT_POINT/etc/systemd/system/" 2>/dev/null | grep -qiF "$svalue" && found="${found}sigs:${sname} " ;;
+            history) grep -qiF "$svalue" "$MOUNT_POINT/root/.bash_history" 2>/dev/null && found="${found}sigh:${sname} " ;;
+        esac
+    done < "$SIG_CONF"
+}
+
+# GA 模式：生成追加进 guest 检测脚本的自定义检查片段
+custom_ga_checks() {
+    [ -f "$SIG_CONF" ] || return 0
+    local stype svalue sname
+    while IFS='|' read -r stype svalue sname; do
+        case "$stype" in path|service|history) ;; *) continue;; esac
+        _sig_clean "$svalue" || continue
+        _sig_clean "$sname" || sname="custom"
+        case "$stype" in
+            path)    printf "[ -e '%s' ] && found=\"\${found}sigp:%s \"\n" "$svalue" "$sname" ;;
+            service) printf "systemctl is-active --quiet '%s' 2>/dev/null && found=\"\${found}sigs:%s \"\n" "$svalue" "$sname" ;;
+            history) printf "for h in /root/.bash_history /home/*/.bash_history; do [ -f \"\$h\" ] && grep -qiF '%s' \"\$h\" 2>/dev/null && found=\"\${found}sigh:%s \"; done\n" "$svalue" "$sname" ;;
+        esac
+    done < "$SIG_CONF"
 }
 
 # 磁盘挂载检测：复制磁盘→qemu-nbd只读挂载→检查文件系统
@@ -185,6 +239,7 @@ check_vm_disk() {
         hc=$(grep -ciE "shlii\.io|incushlii|nodehatch|docs\.nodehatch\.com" "$MOUNT_POINT/root/.bash_history" 2>/dev/null || true)
         [ "${hc:-0}" -gt 0 ] && found="${found}hist:${hc} " \
           && det="${det}##hist=$(grep -ihE "shlii\.io|incushlii|nodehatch|docs\.nodehatch\.com" "$MOUNT_POINT/root/.bash_history" 2>/dev/null | sed 's/["\\#|,]/ /g' | cut -c1-100 | tr '\n' ',' | sed 's/,$//')"
+        custom_disk_checks
         umount "$MOUNT_POINT" 2>/dev/null
         if [ -n "$found" ]; then
             result="detected|disk|${found% }${det}"

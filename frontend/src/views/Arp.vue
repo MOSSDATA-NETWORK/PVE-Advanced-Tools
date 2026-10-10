@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
-import { arpApi, hostsApi } from '../api'
+import { arpApi, hostsApi, arpStatsApi, jobsApi } from '../api'
 
 const hosts = ref<any[]>([])
 const modes = ref<Record<number, string>>({})
 const loading = ref(true)
+const statsHost = ref<number | null>(null)
+const statsRows = ref<any[]>([])
+const statsLoading = ref(false)
 const notice = ref<{ ok: boolean; text: string } | null>(null)
 const detailHost = ref<number | null>(null)
 const whitelist = ref<any[]>([])
@@ -105,6 +108,31 @@ function modeLabel(m: string | undefined) {
   if (m === 'static') return '静态映射'
   return '未安装'
 }
+
+async function collectStats() {
+  if (!statsHost.value) { showNotice(false, '请选择主机'); return }
+  statsLoading.value = true
+  try {
+    const res = await arpStatsApi.collect(statsHost.value)
+    if (!res.ok) { showNotice(false, res.error); return }
+    const jobId = res.job_id
+    for (let i = 0; i < 40; i++) {
+      await new Promise(r => setTimeout(r, 1500))
+      const j = await jobsApi.get(jobId)
+      if (j.ok && ['succeeded', 'failed', 'rolled_back', 'rollback_failed', 'abandoned'].includes(j.data.job.status)) break
+    }
+    showNotice(true, '采集完成')
+    loadStats()
+  } finally {
+    statsLoading.value = false
+  }
+}
+
+async function loadStats() {
+  if (!statsHost.value) { statsRows.value = []; return }
+  const res = await arpStatsApi.list(statsHost.value)
+  if (res.ok) statsRows.value = res.data
+}
 </script>
 
 <template>
@@ -141,6 +169,31 @@ function modeLabel(m: string | undefined) {
           </tbody>
         </table>
       </div>
+    </div>
+
+    <!-- 效果统计 -->
+    <div class="card" id="stats" style="margin-top: 16px;">
+      <h3 style="margin: 0 0 12px; font-size: 16px;">效果统计（广播包丢弃计数，节点最近一次应用以来）</h3>
+      <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+        <select class="form-input" v-model="statsHost" @change="loadStats" style="width: 200px;">
+          <option :value="null">选择主机</option>
+          <option v-for="h in hosts" :key="h.id" :value="h.id">{{ h.name }}</option>
+        </select>
+        <button class="btn btn-primary" @click="collectStats" :disabled="statsLoading">{{ statsLoading ? '采集中…' : '立即采集' }}</button>
+      </div>
+      <table v-if="statsRows.length">
+        <thead><tr><th>采集时间</th><th>VM 链丢弃（按链）</th><th>BPDU 丢弃</th></tr></thead>
+        <tbody>
+          <tr v-for="r in statsRows" :key="r.id">
+            <td>{{ r.collected_at }}</td>
+            <td style="font-family: monospace; font-size: 12px;">
+              {{ Object.entries(r.vm_drops).map(([k, v]) => `${k}:${v}`).join(' ') || '—' }}
+            </td>
+            <td>{{ r.bpdu_drops }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p v-else style="color: #888; font-size: 13px;">暂无样本——选择主机后点「立即采集」</p>
     </div>
 
     <!-- 白名单与映射管理弹窗 -->
