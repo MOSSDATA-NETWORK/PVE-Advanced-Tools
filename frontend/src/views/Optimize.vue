@@ -6,7 +6,7 @@ import axios from 'axios'
 
 const route = useRoute()
 const tab = ref<string>((route.query.tab as string) || 'init')
-watch(() => route.query.tab, t => { if (t) tab.value = t as string })
+watch(() => route.query.tab, t => { tab.value = (t as string) || 'init' })
 
 const hosts = ref<any[]>([])
 const components = ref<Record<string, any>>({})

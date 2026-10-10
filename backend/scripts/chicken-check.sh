@@ -139,7 +139,7 @@ custom_disk_checks() {
         _sig_clean "$svalue" || continue
         _sig_clean "$sname" || sname="custom"
         case "$stype" in
-            path)    [ -e "$MOUNT_POINT$svalue" ] && found="${found}sigp:${sname} " ;;
+            path)    case "$svalue" in *..*) continue;; esac; [ -e "$MOUNT_POINT$svalue" ] && found="${found}sigp:${sname} " ;;
             service) ls "$MOUNT_POINT/etc/systemd/system/" 2>/dev/null | grep -qiF "$svalue" && found="${found}sigs:${sname} " ;;
             history) grep -qiF "$svalue" "$MOUNT_POINT/root/.bash_history" 2>/dev/null && found="${found}sigh:${sname} " ;;
         esac

@@ -11,6 +11,8 @@ watch(() => route.query.tab, (t) => {
   if (t && ['policies', 'templates', 'events', 'nodes', 'access'].includes(t as string)) {
     tab.value = t as string
     if (t === 'events') loadEvents()
+  } else if (!t) {
+    tab.value = 'nodes'
   }
 })
 const hosts = ref<any[]>([])

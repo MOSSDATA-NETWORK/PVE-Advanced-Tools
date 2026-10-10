@@ -28,7 +28,7 @@ async function saveMirrorToken() {
 }
 
 const tab = ref<string>((route.query.tab as string) || 'account')
-watch(() => route.query.tab, t => { if (t) tab.value = t as string })
+watch(() => route.query.tab, t => { tab.value = (t as string) || 'account' })
 
 const router = useRouter()
 const notifications = ref<any[]>([])

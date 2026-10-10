@@ -5,7 +5,7 @@ import { arpApi, hostsApi, arpStatsApi, jobsApi } from '../api'
 
 const route = useRoute()
 const tab = ref<string>((route.query.tab as string) || 'mode')
-watch(() => route.query.tab, t => { if (t) tab.value = t as string })
+watch(() => route.query.tab, t => { tab.value = (t as string) || 'mode' })
 
 const hosts = ref<any[]>([])
 const modes = ref<Record<number, string>>({})
@@ -121,13 +121,23 @@ async function collectStats() {
     const res = await arpStatsApi.collect(statsHost.value)
     if (!res.ok) { showNotice(false, res.error); return }
     const jobId = res.job_id
+    let finalStatus = ''
     for (let i = 0; i < 40; i++) {
       await new Promise(r => setTimeout(r, 1500))
       const j = await jobsApi.get(jobId)
-      if (j.ok && ['succeeded', 'failed', 'rolled_back', 'rollback_failed', 'abandoned'].includes(j.data.job.status)) break
+      if (j.ok && ['succeeded', 'failed', 'rolled_back', 'rollback_failed', 'abandoned'].includes(j.data.job.status)) {
+        finalStatus = j.data.job.status
+        break
+      }
     }
-    showNotice(true, '采集完成')
-    loadStats()
+    if (finalStatus === 'succeeded') {
+      showNotice(true, '采集完成')
+      loadStats()
+    } else if (finalStatus) {
+      showNotice(false, `采集任务失败（${finalStatus}），详见任务中心 #${jobId}`)
+    } else {
+      showNotice(false, `采集超时（任务 #${jobId} 仍在运行，稍后在任务中心查看结果）`)
+    }
   } finally {
     statsLoading.value = false
   }

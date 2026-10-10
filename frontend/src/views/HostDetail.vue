@@ -1,11 +1,17 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
-import { useRoute } from 'vue-router'
+import { ref, onMounted, computed, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { hostsApi, vmsApi, jobsApi, qosApi, netguardApi, arpApi, optimizeApi } from '../api'
 
 const route = useRoute()
+const router = useRouter()
 const hostId = Number(route.params.id)
 const tab = ref<string>((route.query.tab as string) || 'overview')
+watch(() => route.query.tab, t => { tab.value = (t as string) || 'overview' })
+function setTab(t: string) {
+  tab.value = t
+  router.replace({ query: { ...route.query, tab: t } })
+}
 const host = ref<any>(null)
 const components = ref<any[]>([])
 const vms = ref<any[]>([])
@@ -97,7 +103,7 @@ const jobStatusLabel: Record<string, string> = {
 
     <div style="display: flex; gap: 8px; margin-bottom: 16px;">
       <button v-for="t in ['overview', 'components', 'vms', 'jobs', 'rollback']" :key="t"
-        class="btn" :class="tab === t ? 'btn-primary' : 'btn-secondary'" @click="tab = t">
+        class="btn" :class="tab === t ? 'btn-primary' : 'btn-secondary'" @click="setTab(t)">
         {{ { overview: '概览', components: '组件管理', vms: 'VM 列表', jobs: '任务历史', rollback: '回滚操作' }[t] }}
       </button>
     </div>

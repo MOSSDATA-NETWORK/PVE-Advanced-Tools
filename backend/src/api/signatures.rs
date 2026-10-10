@@ -35,6 +35,10 @@ fn validate_sig(body: &SigBody) -> Result<(), String> {
     if !ok(&body.value) || !ok(&body.name) {
         return Err("名称与值只允许字母数字与 . - _ / ~ : 字符（≤200 字）".into());
     }
+    // path 会拼接进挂载点做磁盘检查：禁止 .. 逃逸挂载点
+    if body.value.contains("..") {
+        return Err("值不允许包含 ..".into());
+    }
     if body.sig_type == "path" && !body.value.starts_with('/') {
         return Err("path 类型须为绝对路径".into());
     }
@@ -59,9 +63,11 @@ pub async fn create(State(state): State<Arc<AppState>>, jar: CookieJar, Json(bod
 }
 
 pub async fn toggle(State(state): State<Arc<AppState>>, Path(id): Path<i64>) -> Json<Value> {
-    let _ = sqlx::query("UPDATE detect_signatures SET enabled = 1 - enabled WHERE id=?")
-        .bind(id).execute(&state.db).await;
-    Json(json!({"ok": true}))
+    match sqlx::query("UPDATE detect_signatures SET enabled = 1 - enabled WHERE id=?")
+        .bind(id).execute(&state.db).await {
+        Ok(_) => Json(json!({"ok": true})),
+        Err(e) => Json(json!({"ok": false, "error": e.to_string()})),
+    }
 }
 
 pub async fn delete(State(state): State<Arc<AppState>>, jar: CookieJar, Path(id): Path<i64>) -> Json<Value> {
@@ -70,7 +76,10 @@ pub async fn delete(State(state): State<Arc<AppState>>, jar: CookieJar, Path(id)
     if let Some((1,)) = builtin {
         return Json(json!({"ok": false, "error": "内置特征不可删除（可停用）"}));
     }
-    let _ = sqlx::query("DELETE FROM detect_signatures WHERE id=?").bind(id).execute(&state.db).await;
+    let r = sqlx::query("DELETE FROM detect_signatures WHERE id=?").bind(id).execute(&state.db).await;
+    if let Err(e) = r {
+        return Json(json!({"ok": false, "error": e.to_string()}));
+    }
     let actor = crate::audit::actor_from_cookie(&state.db, &jar).await;
     crate::audit::log(&state.db, &actor, "signature.delete", Some("detect_signatures"), Some(id), None, None).await;
     Json(json!({"ok": true}))

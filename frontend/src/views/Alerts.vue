@@ -7,7 +7,7 @@ import axios from 'axios'
 
 const route = useRoute()
 const tab = ref<string>((route.query.tab as string) || 'inspect')
-watch(() => route.query.tab, t => { if (t) tab.value = t as string })
+watch(() => route.query.tab, t => { tab.value = (t as string) || 'inspect' })
 
 const rules = ref<any[]>([])
 const history = ref<any[]>([])

@@ -95,7 +95,9 @@ build_chain() {
     hex=$(domain_to_hex "$d")
     if [ "$bin" = "iptables" ]; then rej="icmp-port-unreachable"; else rej="icmp6-port-unreachable"; fi
     if [ "$ENABLE_LOG" = "1" ]; then
-      "$bin" -A "$chain" -p tcp --dport 443 -m string --string "$d" --algo bm -m limit --limit 5/min -j LOG --log-prefix "NG_DOMAIN($d): " --log-level 6 || return 1
+      # iptables log-prefix 上限 29 字符："NG_DOMAIN(" + 域名 + "): "，域名最多 16 字符，超出截断
+      local dshort="${d:0:16}"
+      "$bin" -A "$chain" -p tcp --dport 443 -m string --string "$d" --algo bm -m limit --limit 5/min -j LOG --log-prefix "NG_DOMAIN($dshort): " --log-level 6 || return 1
     fi
     "$bin" -A "$chain" -p tcp --dport 443 -m string --string "$d" --algo bm -j REJECT --reject-with tcp-reset || return 1
     "$bin" -A "$chain" -p tcp --dport 80 -m string --string "$d" --algo bm -j REJECT --reject-with tcp-reset || return 1
