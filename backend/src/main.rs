@@ -187,6 +187,10 @@ async fn main() -> anyhow::Result<()> {
     // 加密密钥：优先从环境变量读取，否则自动生成并打印
     let master_key = load_or_generate_master_key();
 
+    // 环境变量引导创建管理员（服务器无外网隧道时的初始化通道）：
+    // 能设置服务环境变量即拥有本机 root，不引入网络暴露面；仅当尚无管理员时生效
+    bootstrap_admin_from_env(&pool).await;
+
     // 检查 TLS 配置
     let tls_cert = std::env::var("TLS_CERT").ok();
     let tls_key = std::env::var("TLS_KEY").ok();
@@ -373,6 +377,22 @@ async fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+/// 首次启动经环境变量创建管理员：INITIAL_ADMIN_USERNAME / INITIAL_ADMIN_PASSWORD
+/// 两个都设置且库中无管理员时生效；成功后请从服务配置中移除这两个变量
+async fn bootstrap_admin_from_env(pool: &sqlx::SqlitePool) {
+    let (Ok(user), Ok(pass)) = (std::env::var("INITIAL_ADMIN_USERNAME"), std::env::var("INITIAL_ADMIN_PASSWORD")) else {
+        return;
+    };
+    if crate::auth::is_initialized(pool).await {
+        tracing::warn!("INITIAL_ADMIN_* 已设置但管理员已存在，忽略（请从服务配置中移除这两个变量）");
+        return;
+    }
+    match crate::auth::setup_admin(pool, user.trim(), &pass, false).await {
+        Ok(_) => tracing::info!("已通过环境变量创建管理员「{}」。请立即从服务配置中移除 INITIAL_ADMIN_* 并重启", user.trim()),
+        Err(e) => tracing::error!("环境变量创建管理员失败: {}", e),
+    }
 }
 
 /// 加载或生成加密密钥

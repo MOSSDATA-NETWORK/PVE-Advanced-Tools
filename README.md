@@ -78,7 +78,15 @@ The installer:
 - **generates and persists `MASTER_KEY`** in `/opt/pve-advanced-tools/env` (mode 600) — reused on reinstall
 - registers and starts the `pve-advanced-tools` systemd unit
 
-Then open `http://<server>:3210` — the initial admin setup is only accepted from a loopback connection (SSH port-forward if you installed on a remote host: `ssh -L 3210:127.0.0.1:3210 root@server`).
+**Create the admin account** (either way):
+
+1. **Environment bootstrap (recommended for headless servers)**: set `INITIAL_ADMIN_USERNAME=admin` and
+   `INITIAL_ADMIN_PASSWORD=<strong-password>` before first start (with install.sh, append them to
+   `/opt/pve-advanced-tools/env`). The account is created on first boot — **remove both variables and restart afterwards**.
+2. **SSH tunnel**: `ssh -L 3210:127.0.0.1:3210 root@server`, then open `http://127.0.0.1:3210` for the web setup
+   (the web setup endpoint is loopback-only so nobody can race you to create the admin once the domain is live).
+
+After initialization, everyday access through your reverse-proxied domain is unrestricted.
 
 ### Configuration (environment variables)
 
@@ -91,6 +99,7 @@ Then open `http://<server>:3210` — the initial admin setup is only accepted fr
 | `STATIC_DIR` | `static` | Frontend assets |
 | `DATA_DIR` | `data` | Runtime files (managed `known_hosts`) |
 | `UPDATE_SIGN_PUBKEY` | — | ed25519 public key (hex) for update signature verification. If set, releases must carry a valid `.sig`; if unset, online update is refused (fail-closed) |
+| `INITIAL_ADMIN_USERNAME` / `INITIAL_ADMIN_PASSWORD` | — | Bootstrap admin on first boot (only when no admin exists); remove after creation |
 | `UPDATE_GITHUB_REPO` | `MOSSDATA-NETWORK/PVE-Advanced-Tools` | Update source |
 | `platform_public_url` (panel setting) | — | Node-reachable platform URL, required before pushing vmqos configs |
 

@@ -78,14 +78,22 @@ sudo bash deploy/install.sh [端口]   # 默认 3210
 - **生成并持久化 `MASTER_KEY`** 到 `/opt/pve-advanced-tools/env`（600 权限）——重装时复用
 - 注册并启动 `pve-advanced-tools` systemd 服务
 
-然后访问 `http://<服务器>:3210`。**初始化管理员仅限本机直连**——装在远端服务器时先端口转发：
-`ssh -L 3210:127.0.0.1:3210 root@服务器`，再访问 `http://127.0.0.1:3210`。
+**创建管理员**（两种方式任选）：
+
+1. **环境变量引导（推荐，适合纯外网服务器）**：启动前在服务配置中设置
+   `INITIAL_ADMIN_USERNAME=admin` 与 `INITIAL_ADMIN_PASSWORD=<强密码>`（install.sh 可写入 `/opt/pve-advanced-tools/env`），
+   首次启动自动建号；**创建成功后请移除这两个变量并重启**。
+2. **SSH 隧道**：`ssh -L 3210:127.0.0.1:3210 root@服务器`，浏览器访问 `http://127.0.0.1:3210` 走页面初始化
+  （网页初始化端点仅限本机直连，防止域名公布后他人抢建管理员）。
+
+初始化完成后，日常访问走域名反代即可，无任何限制。
 
 ### 配置项（环境变量）
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
 | `MASTER_KEY` | 自动生成（打印一次） | **生产必填**。64 位 hex，用于加密已存凭据；丢失或变更后旧凭据无法解密（失败关闭） |
+| `INITIAL_ADMIN_USERNAME` / `INITIAL_ADMIN_PASSWORD` | — | 首次启动引导创建管理员（仅无管理员时生效）；创建成功后应移除 |
 | `DATABASE_URL` | `sqlite:pve-advanced-tools.db?mode=rwc` | SQLite 路径 |
 | `PORT` / `HOST` | `3210` / `0.0.0.0` | 监听地址 |
 | `TLS_CERT` / `TLS_KEY` | — | 直接 TLS；或在 HTTPS 反代后设 `BEHIND_TLS_PROXY=1` |
