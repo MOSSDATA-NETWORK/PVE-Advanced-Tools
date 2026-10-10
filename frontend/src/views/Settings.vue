@@ -1,12 +1,17 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import {ref, onMounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { notificationsApi, versionApi, passkeyApi } from '../api'
 import { registerPasskey, isWebAuthnSupported } from '../passkey'
 import axios from 'axios'
 import { generateQrDataUrl } from '../qr'
 import { formatTime } from '../time'
 
+
+const route = useRoute()
+const tab = ref<string>((route.query.tab as string) || 'account')
+watch(() => route.query.tab, t => { if (t) tab.value = t as string })
+function setTab(t: string) { router.replace({ query: { tab: t } }) }
 
 const router = useRouter()
 const notifications = ref<any[]>([])
@@ -350,7 +355,15 @@ async function deletePasskey() {
     </div>
 
     <!-- Account Settings -->
-    <div class="card" style="margin-bottom: 16px;">
+
+        <div style="display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;">
+          <button v-for="t in ['account', 'notify', 'about']" :key="t"
+            class="btn" :class="tab === t ? 'btn-primary' : 'btn-secondary'" @click="setTab(t)">
+            {{ { account: '账户与安全', notify: '通知渠道', about: '关于与更新' }[t] }}
+          </button>
+        </div>
+    
+    <div class="card" v-if="tab === 'account'" style="margin-bottom: 16px;">
       <div class="card-header">
         <h3 id="account">账户设置</h3>
       </div>
@@ -412,7 +425,7 @@ async function deletePasskey() {
     </div>
 
     <!-- Version Card -->
-    <div class="card" style="margin-bottom: 16px;">
+    <div class="card" v-if="tab === 'about'" style="margin-bottom: 16px;">
       <div class="card-header">
         <h3 id="about">版本信息</h3>
       </div>
@@ -481,7 +494,7 @@ async function deletePasskey() {
     </div>
 
     <!-- Notification Section -->
-    <div style="display: flex; justify-content: space-between; align-items: center; margin: 28px 0 16px;">
+    <div v-if="tab === 'notify'" style="display: flex; justify-content: space-between; align-items: center; margin: 28px 0 16px;">
       <h2 style="font-size: 20px; font-weight: 600;">通知设置</h2>
       <div style="display: flex; gap: 12px;">
         <button class="btn btn-secondary" @click="testNotifications" :disabled="testing">
@@ -491,7 +504,7 @@ async function deletePasskey() {
       </div>
     </div>
 
-    <div class="card" id="notify">
+    <div class="card" v-if="tab === 'notify'" id="notify">
       <div v-if="loading" style="text-align: center; padding: 40px;">
         <div class="spinner" style="margin: 0 auto;"></div>
       </div>

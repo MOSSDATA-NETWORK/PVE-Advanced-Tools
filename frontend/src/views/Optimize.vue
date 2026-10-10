@@ -1,7 +1,14 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted , watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { hostsApi } from '../api'
 import axios from 'axios'
+
+const route = useRoute()
+const router = useRouter()
+const tab = ref<string>((route.query.tab as string) || 'init')
+watch(() => route.query.tab, t => { if (t) tab.value = t as string })
+function setTab(t: string) { router.replace({ query: { tab: t } }) }
 
 const hosts = ref<any[]>([])
 const components = ref<Record<string, any>>({})
@@ -135,6 +142,13 @@ function parseStatus(hostId: number) {
       <span style="font-size: 14px;">{{ notice.text }}</span>
     </div>
 
+    <div style="display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;">
+      <button v-for="t in ['init', 'tune', 'rollback']" :key="t"
+        class="btn" :class="tab === t ? 'btn-primary' : 'btn-secondary'" @click="setTab(t)">
+        {{ { init: '一键初始化', tune: '参数优化', rollback: '回滚中心' }[t] }}
+      </button>
+    </div>
+
     <div class="card" id="init">
       <div v-if="loading" style="text-align: center; padding: 40px;"><div class="spinner" style="margin: 0 auto;"></div></div>
       <div v-else class="table-container">
@@ -148,12 +162,12 @@ function parseStatus(hostId: number) {
               <td><span :class="['badge', compInstalled(h.id, 'optimize') ? 'badge-online' : 'badge-unknown']">{{ compInstalled(h.id, 'optimize') ? '已优化' : '未优化' }}</span></td>
               <td>
                 <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-                  <button class="btn btn-sm btn-primary" @click="run(h.id, 'init', '一键初始化')" :disabled="busy !== null">初始化</button>
-                  <button class="btn btn-sm btn-primary" @click="run(h.id, 'tune', '参数优化')" :disabled="busy !== null">参数优化</button>
-                  <button class="btn btn-sm btn-secondary" @click="runUpgrade(h.id)" :disabled="busy !== null" title="dist-upgrade，不可回滚">系统更新</button>
-                  <button class="btn btn-sm btn-secondary" @click="refreshStatus(h.id)" :disabled="busy !== null">状态回采</button>
-                  <button v-if="compInstalled(h.id, 'nosub')" class="btn btn-sm btn-danger" @click="rollback(h.id, 'nosub')" :disabled="busy !== null">回滚初始化</button>
-                  <button v-if="compInstalled(h.id, 'optimize')" class="btn btn-sm btn-danger" @click="rollback(h.id, 'optimize')" :disabled="busy !== null">回滚优化</button>
+                  <button v-if="tab === 'init'" class="btn btn-sm btn-primary" @click="run(h.id, 'init', '一键初始化')" :disabled="busy !== null">初始化</button>
+                  <button v-if="tab === 'tune'" class="btn btn-sm btn-primary" @click="run(h.id, 'tune', '参数优化')" :disabled="busy !== null">参数优化</button>
+                  <button v-if="tab === 'init'" class="btn btn-sm btn-secondary" @click="runUpgrade(h.id)" :disabled="busy !== null" title="dist-upgrade，不可回滚">系统更新</button>
+                  <button v-if="tab === 'tune'" class="btn btn-sm btn-secondary" @click="refreshStatus(h.id)" :disabled="busy !== null">状态回采</button>
+                  <button v-if="tab === 'rollback' && compInstalled(h.id, 'nosub')" class="btn btn-sm btn-danger" @click="rollback(h.id, 'nosub')" :disabled="busy !== null">回滚初始化</button>
+                  <button v-if="tab === 'rollback' && compInstalled(h.id, 'optimize')" class="btn btn-sm btn-danger" @click="rollback(h.id, 'optimize')" :disabled="busy !== null">回滚优化</button>
                 </div>
                 <div v-if="parseStatus(h.id)" style="font-size: 12px; color: var(--text-tertiary); margin-top: 6px;">
                   备份：nosub [{{ parseStatus(h.id).nosub_backups || '无' }}] optimize [{{ parseStatus(h.id).optimize_backups || '无' }}]

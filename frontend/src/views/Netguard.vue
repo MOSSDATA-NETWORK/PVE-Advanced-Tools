@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { netguardApi, hostsApi, jobsApi } from '../api'
 
 const ports = ref<any[]>([])
@@ -15,6 +16,11 @@ const newPort = ref({ name: '', ports: '' })
 const newDomain = ref('')
 const importText = ref('')
 const showImport = ref(false)
+const route = useRoute()
+const router = useRouter()
+const tab = ref<string>((route.query.tab as string) || 'overview')
+watch(() => route.query.tab, t => { if (t) tab.value = t as string })
+function setTab(t: string) { router.replace({ query: { tab: t } }) }
 const logEnabled = ref(false)
 const logHost = ref<number | null>(null)
 const logOutput = ref('')
@@ -158,8 +164,16 @@ async function fetchLogs() {
       <button class="btn btn-primary" @click="deployAll">下发到生效主机</button>
     </div>
 
+    <!-- 页签 -->
+    <div style="display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;">
+      <button v-for="t in ['overview', 'scope', 'ports', 'domains', 'logs']" :key="t"
+        class="btn" :class="tab === t ? 'btn-primary' : 'btn-secondary'" @click="setTab(t)">
+        {{ { overview: '管控总览', scope: '生效范围', ports: '端口封堵', domains: '域名拦截', logs: '拦截日志' }[t] }}
+      </button>
+    </div>
+
     <!-- 管控总览 -->
-    <div class="card" id="overview" style="margin-bottom: 16px;">
+    <div class="card" v-if="tab === 'overview'" id="overview" style="margin-bottom: 16px;">
       <h3 style="margin: 0 0 12px; font-size: 16px;">管控总览（各节点组件状态）</h3>
       <table>
         <thead><tr><th>节点</th><th>组件状态</th><th>明细</th></tr></thead>
@@ -185,7 +199,7 @@ async function fetchLogs() {
     </div>
 
     <!-- 拦截日志 -->
-    <div class="card" id="logs" style="margin-bottom: 16px;">
+    <div class="card" v-if="tab === 'logs'" id="logs" style="margin-bottom: 16px;">
       <h3 style="margin: 0 0 12px; font-size: 16px;">拦截日志（近 2 小时内核日志）</h3>
       <div style="display: flex; gap: 8px; margin-bottom: 12px;">
         <select class="form-input" v-model="logHost" style="width: 200px;">
@@ -205,7 +219,7 @@ async function fetchLogs() {
     <div v-if="loading" style="text-align: center; padding: 40px;"><div class="spinner" style="margin: 0 auto;"></div></div>
     <template v-else>
       <!-- 生效范围 -->
-      <div class="card" id="scope" style="margin-bottom: 16px;">
+      <div class="card" v-if="tab === 'scope'" id="scope" style="margin-bottom: 16px;">
         <h3 style="margin: 0 0 12px; font-size: 16px;">生效范围（按宿主机）</h3>
         <div class="table-container">
           <table>
@@ -226,7 +240,7 @@ async function fetchLogs() {
       </div>
 
       <!-- 端口封堵 -->
-      <div class="card" id="ports" style="margin-bottom: 16px;">
+      <div class="card" v-if="tab === 'ports'" id="ports" style="margin-bottom: 16px;">
         <h3 style="margin: 0 0 12px; font-size: 16px;">端口封堵列表</h3>
         <div class="table-container">
           <table>
@@ -252,7 +266,7 @@ async function fetchLogs() {
       </div>
 
       <!-- 域名拦截 -->
-      <div class="card" style="margin-bottom: 16px;">
+      <div class="card" v-if="tab === 'domains'" style="margin-bottom: 16px;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
           <h3 style="margin: 0; font-size: 16px;" id="domains">域名拦截列表</h3>
           <button class="btn btn-sm btn-secondary" @click="showImport = !showImport">批量导入</button>
@@ -284,7 +298,7 @@ async function fetchLogs() {
       </div>
 
       <!-- VM 白名单 -->
-      <div class="card" id="whitelist">
+      <div class="card" v-if="tab === 'scope'" id="whitelist">
         <h3 style="margin: 0 0 12px; font-size: 16px;">VM 白名单豁免（按 VMID，guest 无法伪造）</h3>
         <div class="table-container">
           <table>

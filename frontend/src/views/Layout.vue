@@ -20,7 +20,7 @@ const navGroups: NavGroup[] = [
     name: 'hosts', label: '宿主机管理', icon: 'hosts',
     children: [
       { label: '主机列表', path: '/hosts' },
-      { label: '添加主机', path: '/hosts#add' },
+      { label: '添加主机', path: '/hosts?add=1' },
       { label: '任务中心', path: '/jobs' },
     ],
   },
@@ -35,18 +35,19 @@ const navGroups: NavGroup[] = [
   {
     name: 'netguard', label: '出网管控', icon: 'netguard',
     children: [
-      { label: '生效范围', path: '/netguard#scope' },
-      { label: '端口封堵', path: '/netguard#ports' },
-      { label: '域名拦截', path: '/netguard#domains' },
-      { label: 'VM 白名单', path: '/netguard#whitelist' },
+      { label: '管控总览', path: '/netguard?tab=overview' },
+      { label: '生效范围', path: '/netguard?tab=scope' },
+      { label: '端口封堵', path: '/netguard?tab=ports' },
+      { label: '域名拦截', path: '/netguard?tab=domains' },
+      { label: '拦截日志', path: '/netguard?tab=logs' },
     ],
   },
   {
     name: 'arp', label: 'ARP 降噪', icon: 'arp',
     children: [
-      { label: '运行模式', path: '/arp#mode' },
-      { label: '白名单管理', path: '/arp' },
-      { label: '效果统计', path: '/arp#stats' },
+      { label: '运行模式', path: '/arp?tab=mode' },
+      { label: '白名单管理', path: '/arp?tab=mode' },
+      { label: '效果统计', path: '/arp?tab=stats' },
     ],
   },
   {
@@ -62,26 +63,26 @@ const navGroups: NavGroup[] = [
   {
     name: 'optimize', label: '母机优化', icon: 'optimize',
     children: [
-      { label: '一键初始化', path: '/optimize#init' },
-      { label: '参数优化', path: '/optimize#tune' },
-      { label: '回滚中心', path: '/optimize#rollback' },
+      { label: '一键初始化', path: '/optimize?tab=init' },
+      { label: '参数优化', path: '/optimize?tab=tune' },
+      { label: '回滚中心', path: '/optimize?tab=rollback' },
     ],
   },
   {
     name: 'alerts', label: '告警与巡检', icon: 'alerts',
     children: [
-      { label: '巡检计划', path: '/alerts#inspect' },
-      { label: '告警规则', path: '/alerts#rules' },
-      { label: '告警历史', path: '/alerts#history' },
+      { label: '巡检计划', path: '/alerts?tab=inspect' },
+      { label: '告警规则', path: '/alerts?tab=rules' },
+      { label: '告警历史', path: '/alerts?tab=history' },
     ],
   },
   {
     name: 'settings', label: '系统设置', icon: 'settings',
     children: [
-      { label: '账户与安全', path: '/settings#account' },
-      { label: '通知渠道', path: '/settings#notify' },
+      { label: '账户与安全', path: '/settings?tab=account' },
+      { label: '通知渠道', path: '/settings?tab=notify' },
       { label: '审计日志', path: '/audit' },
-      { label: '关于与更新', path: '/settings#about' },
+      { label: '关于与更新', path: '/settings?tab=about' },
     ],
   },
 ]
@@ -146,7 +147,7 @@ function navigate(path: string) {
 }
 
 function goToSettings() {
-  router.push('/settings#about')
+  router.push('/settings?tab=about')
   sidebarOpen.value = false
 }
 </script>
@@ -211,7 +212,7 @@ function goToSettings() {
                 v-for="sub in group.children"
                 :key="sub.path"
                 class="nav-subitem"
-                :class="{ active: route.fullPath === sub.path || (sub.path.split(/[#?]/)[0] !== '/' && false) }"
+                :class="{ active: route.fullPath === sub.path }"
                 @click="navigate(sub.path)"
               >
                 {{ sub.label }}

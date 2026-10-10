@@ -118,7 +118,7 @@ async function doPasskeyLogin() {
         </svg>
       </div>
       <h1 class="login-title">PVE Advanced Tools</h1>
-      <p class="login-subtitle">PVE 切鸡检测平台</p>
+      <p class="login-subtitle">PVE 母机一体化管控平台</p>
 
       <!-- 密码登录 -->
       <template v-if="!needsMfa">

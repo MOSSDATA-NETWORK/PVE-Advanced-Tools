@@ -1,6 +1,13 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed , watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { arpApi, hostsApi, arpStatsApi, jobsApi } from '../api'
+
+const route = useRoute()
+const router = useRouter()
+const tab = ref<string>((route.query.tab as string) || 'mode')
+watch(() => route.query.tab, t => { if (t) tab.value = t as string })
+function setTab(t: string) { router.replace({ query: { tab: t } }) }
 
 const hosts = ref<any[]>([])
 const modes = ref<Record<number, string>>({})
@@ -147,7 +154,14 @@ async function loadStats() {
       <span style="font-size: 14px;">{{ notice.text }}</span>
     </div>
 
-    <div class="card" id="mode">
+    <div style="display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;">
+      <button v-for="t in ['mode', 'stats']" :key="t"
+        class="btn" :class="tab === t ? 'btn-primary' : 'btn-secondary'" @click="setTab(t)">
+        {{ { mode: '运行模式与白名单', stats: '效果统计' }[t] }}
+      </button>
+    </div>
+
+    <div class="card" v-if="tab === 'mode'" id="mode">
       <div v-if="loading" style="text-align: center; padding: 40px;"><div class="spinner" style="margin: 0 auto;"></div></div>
       <div v-else class="table-container">
         <table>
@@ -172,7 +186,7 @@ async function loadStats() {
     </div>
 
     <!-- 效果统计 -->
-    <div class="card" id="stats" style="margin-top: 16px;">
+    <div class="card" v-if="tab === 'stats'" id="stats" style="margin-top: 16px;">
       <h3 style="margin: 0 0 12px; font-size: 16px;">效果统计（广播包丢弃计数，节点最近一次应用以来）</h3>
       <div style="display: flex; gap: 8px; margin-bottom: 12px;">
         <select class="form-input" v-model="statsHost" @change="loadStats" style="width: 200px;">

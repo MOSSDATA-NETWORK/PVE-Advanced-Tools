@@ -18,7 +18,7 @@ const deploying = ref<number | null>(null)
 
 onMounted(() => {
   loadHosts()
-  if (route.hash === '#add') openAdd()
+  if (route.hash === '#add' || route.query.add) openAdd()
 })
 
 async function loadHosts() {
