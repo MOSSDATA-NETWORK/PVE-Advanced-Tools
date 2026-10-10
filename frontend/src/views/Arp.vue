@@ -201,6 +201,25 @@ async function loadStats() {
       <p v-else style="color: #888; font-size: 13px;">暂无样本——选择主机后点「立即采集」</p>
     </div>
 
+    <!-- 白名单管理：选主机后进入白名单/映射管理 -->
+    <div class="card" v-if="tab === 'whitelist'" id="whitelist" style="margin-top: 16px;">
+      <h3 style="margin: 0 0 12px; font-size: 16px;">白名单与静态映射管理</h3>
+      <p style="font-size: 13px; color: var(--text-tertiary); margin: 0 0 12px;">灰度白名单：非空时只有列出的 VM 装过滤规则；静态映射表：static 模式的权威数据源。</p>
+      <div class="table-container">
+        <table>
+          <thead><tr><th>主机</th><th>运行模式</th><th>操作</th></tr></thead>
+          <tbody>
+            <tr v-for="h in hosts.filter(h => modes[h.id])" :key="h.id">
+              <td style="font-weight: 600;">{{ h.name }}</td>
+              <td><span class="badge badge-online">{{ modeLabel(modes[h.id]) }}</span></td>
+              <td><button class="btn btn-sm btn-primary" @click="openDetail(h.id)">管理白名单/映射</button></td>
+            </tr>
+            <tr v-if="!hosts.some(h => modes[h.id])"><td colspan="3" style="text-align: center; color: #888;">暂无已启用 ARP 降噪的主机（先在「运行模式」页启用）</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
     <!-- 白名单与映射管理弹窗 -->
     <div v-if="detailHost" class="modal-overlay" @click.self="detailHost = null">
       <div class="modal" style="max-width: 640px;">

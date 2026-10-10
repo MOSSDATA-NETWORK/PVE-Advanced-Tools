@@ -45,7 +45,7 @@ const navGroups: NavGroup[] = [
     name: 'arp', label: 'ARP 降噪', icon: 'arp',
     children: [
       { label: '运行模式', path: '/arp?tab=mode' },
-      { label: '白名单管理', path: '/arp?tab=mode' },
+      { label: '白名单管理', path: '/arp?tab=whitelist' },
       { label: '效果统计', path: '/arp?tab=stats' },
     ],
   },
