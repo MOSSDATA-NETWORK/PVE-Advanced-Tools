@@ -144,8 +144,12 @@ fn validate_policy(body: &PolicyBody) -> Result<(), String> {
     if body.origin != "domestic" && body.origin != "international" {
         return Err("origin 须为 domestic 或 international".into());
     }
+    let too_big = |v: i64| v > u32::MAX as i64;
     if body.initial_mbps < 0 || body.net2_mbps.map(|v| v < 0).unwrap_or(false) {
-        return Err("速率不得为负（0 = 保留状态但跳过限速）".into());
+        return Err("速率不得为负（0 = 保留记录但跳过限速）".into());
+    }
+    if too_big(body.initial_mbps) || body.net2_mbps.map(too_big).unwrap_or(false) {
+        return Err("速率超出 u32 上限".into());
     }
     if body.origin == "international" && body.net2_mbps.is_some() {
         return Err("net2 专线仅国内源支持".into());

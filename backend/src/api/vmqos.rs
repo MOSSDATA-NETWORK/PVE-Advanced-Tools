@@ -117,6 +117,16 @@ async fn report(state: Arc<AppState>, headers: HeaderMap, body: Option<Value>) -
         qos::record_node_error(&state.db, host.id, "report host_ip 与管理地址不一致").await;
         return (StatusCode::FORBIDDEN, Json(err_body("NODE_FORBIDDEN", "host_ip 与主机不匹配", false)));
     }
+    // 非 0 档仅接受有启用策略的 VM（防 token 泄露后任意 VMID 刷事件）；
+    // 0 档（删除）放行——策略刚被管理员移除时的在途删除上报仍需闭环
+    if stage > 0 {
+        let known: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM qos_policies WHERE host_id=? AND vmid=? AND origin='domestic' AND enabled=1"
+        ).bind(host.id).bind(&vmid).fetch_one(&state.db).await.unwrap_or(0);
+        if known == 0 {
+            return (StatusCode::OK, Json(json!({"ok": true, "ignored": "no active policy"})));
+        }
+    }
     let limit = body.get("limit_mbps").and_then(|v| v.as_f64());
     match qos::record_event(&state, host.id, "domestic", &vmid, stage, limit).await {
         Ok(_) => (StatusCode::OK, Json(json!({"ok": true}))),
@@ -141,10 +151,17 @@ async fn stage_query(state: Arc<AppState>, headers: HeaderMap, q: QosQuery) -> (
     if !qos::node_ip_matches(&host.host, &host_ip) {
         return (StatusCode::FORBIDDEN, Json(err_body("NODE_FORBIDDEN", "host_ip 与主机不匹配", false)));
     }
-    let row: Option<(i64,)> = sqlx::query_as(
+    // DB 错误必须返回可重试 500——当作无记录会让 vmqos 误判「删除成功」
+    let row = match sqlx::query_as::<_, (i64,)>(
         "SELECT current_stage FROM qos_vm_state WHERE host_id=? AND vmid=? AND origin='domestic'"
     )
-    .bind(host.id).bind(&vmid).fetch_optional(&state.db).await.unwrap_or(None);
+    .bind(host.id).bind(&vmid).fetch_optional(&state.db).await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!("stage 核验查询失败 host={}: {}", host.id, e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(err_body("INTERNAL", "查询失败", true)));
+        }
+    };
     match row {
         Some((stage,)) if stage > 0 => (StatusCode::OK, Json(json!({"ok": true, "stage": stage}))),
         _ => (StatusCode::NOT_FOUND, Json(json!({"ok": false, "stage": Value::Null}))),
@@ -192,6 +209,20 @@ pub async fn intl_entry(
             qos::record_node_error(&state.db, host.id, "intl report host_ip 不一致").await;
             return (StatusCode::FORBIDDEN, Json(json!({"ok": false, "error": "host_ip 与主机不匹配"})));
         }
+        // cluster_id 须与主机集群一致；非 0 档须有启用的国际源策略
+        let host_cluster: i64 = sqlx::query_scalar("SELECT COALESCE(cluster_id, 1) FROM hosts WHERE id=?")
+            .bind(host.id).fetch_one(&state.db).await.unwrap_or(1);
+        if body.get("cluster_id").and_then(|v| v.as_i64()).map(|c| c != host_cluster).unwrap_or(false) {
+            return (StatusCode::FORBIDDEN, Json(json!({"ok": false, "error": "cluster_id 与主机集群不匹配"})));
+        }
+        if stage > 0 {
+            let known: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM qos_policies WHERE host_id=? AND vmid=? AND origin='international' AND enabled=1"
+            ).bind(host.id).bind(&vmid).fetch_one(&state.db).await.unwrap_or(0);
+            if known == 0 {
+                return (StatusCode::OK, Json(json!({"ok": true, "ignored": "no active policy"})));
+            }
+        }
         let limit = body.get("limit_mbps").and_then(|v| v.as_f64());
         return match qos::record_event(&state, host.id, "international", &vmid, stage, limit).await {
             Ok(_) => (StatusCode::OK, Json(json!({"ok": true}))),
@@ -206,10 +237,22 @@ pub async fn intl_entry(
     let Some(vmid) = q.vmid else {
         return (StatusCode::BAD_REQUEST, Json(json!({"ok": false, "error": "缺少 vmid"})));
     };
-    let row: Option<(i64,)> = sqlx::query_as(
+    // cluster_id 须与主机所属集群一致（防 token 跨集群查询）
+    let host_cluster: i64 = sqlx::query_scalar("SELECT COALESCE(cluster_id, 1) FROM hosts WHERE id=?")
+        .bind(host.id).fetch_one(&state.db).await.unwrap_or(1);
+    if q.cluster_id.map(|c| c != host_cluster).unwrap_or(false) {
+        return (StatusCode::FORBIDDEN, Json(json!({"ok": false, "error": "cluster_id 与主机集群不匹配"})));
+    }
+    let row = match sqlx::query_as::<_, (i64,)>(
         "SELECT current_stage FROM qos_vm_state WHERE host_id=? AND vmid=? AND origin='international'"
     )
-    .bind(host.id).bind(&vmid).fetch_optional(&state.db).await.unwrap_or(None);
+    .bind(host.id).bind(&vmid).fetch_optional(&state.db).await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!("intl 核验查询失败 host={}: {}", host.id, e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"ok": false, "error": "查询失败，请重试"})));
+        }
+    };
     let stage = row.map(|r| r.0).unwrap_or(0);
     (StatusCode::OK, Json(json!({"ok": true, "active": stage > 0, "stage": stage})))
 }

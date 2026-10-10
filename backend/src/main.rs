@@ -128,6 +128,19 @@ async fn run_migrations(pool: &sqlx::SqlitePool) -> anyhow::Result<()> {
         tx.commit().await?;
     }
 
+    // 结构性补丁（幂等）：qos_tokens 轮换重叠期允许 active+retiring 并存，
+    // 唯一索引只能约束 active；旧索引（含 retiring）丢弃重建
+    let tok_idx: Option<String> = sqlx::query_scalar(
+        "SELECT sql FROM sqlite_master WHERE type='index' AND name='idx_qos_tokens_active'"
+    ).fetch_optional(pool).await?;
+    if let Some(sql) = tok_idx {
+        if sql.contains("!= 'revoked'") {
+            sqlx::query("DROP INDEX idx_qos_tokens_active").execute(pool).await?;
+            sqlx::query("CREATE UNIQUE INDEX idx_qos_tokens_active ON qos_tokens(host_id, purpose) WHERE status = 'active'")
+                .execute(pool).await?;
+        }
+    }
+
     // 结构性补丁（幂等）：results 去重 + (host_id, vmid) 唯一索引（并发扫描防重复行）
     if sqlx::query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='results'")
         .fetch_optional(pool).await?.is_some()

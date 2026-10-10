@@ -77,7 +77,12 @@ async fn run_due_inspections(state: Arc<AppState>) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// 调度检查串行锁：上一 tick 未结束时新 tick 直接跳过（防重叠触发重复扫描）
+static SCHEDULE_CHECK_LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+
 async fn check_and_run_schedules(state: Arc<AppState>) -> anyhow::Result<()> {
+    let lock = SCHEDULE_CHECK_LOCK.get_or_init(|| tokio::sync::Mutex::new(()));
+    let Ok(_guard) = lock.try_lock() else { return Ok(()) };
     let schedules = crate::db::list_schedules(&state.db).await?;
     let now = chrono::Utc::now().naive_utc();
 

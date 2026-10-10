@@ -76,6 +76,11 @@ if [ ! -f "$INSTALL_DIR/env" ]; then
     chmod 600 "$INSTALL_DIR/env"
     echo "   ✅ 已生成 MASTER_KEY（$INSTALL_DIR/env）"
 else
+    chmod 600 "$INSTALL_DIR/env"
+    grep -q '^MASTER_KEY=[0-9a-f]\{64\}$' "$INSTALL_DIR/env" || {
+        echo "❌ $INSTALL_DIR/env 存在但 MASTER_KEY 缺失或格式非法（需 64 位 hex）"
+        exit 1
+    }
     echo "   ✅ 复用已有 MASTER_KEY"
 fi
 

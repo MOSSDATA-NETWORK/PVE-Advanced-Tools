@@ -364,6 +364,11 @@ pub async fn post_job_hook(state: &Arc<AppState>, job: &crate::jobs::Job) -> any
     if job.kind == "qos.config_apply" || job.kind == "qos.install" {
         crate::qos::revoke_retiring(&state.db, job.host_id).await?;
     }
+    // 卸载成功 = 节点接入凭据全部作废（token 不再可用）
+    if job.kind == "qos.uninstall" {
+        sqlx::query("UPDATE qos_tokens SET status='revoked' WHERE host_id=? AND status != 'revoked'")
+            .bind(job.host_id).execute(&state.db).await?;
+    }
     Ok(())
 }
 
@@ -552,8 +557,15 @@ async fn qos_config(state: &Arc<AppState>, host_id: i64) -> anyhow::Result<Strin
     let base = platform_base(state).await?;
     let snapshot_token = crate::qos::active_token_plain(&state.db, &state.master_key, host_id, "snapshot").await?;
     let report_token = crate::qos::active_token_plain(&state.db, &state.master_key, host_id, "report").await?;
-    // 国际站可选：无 token 时留空（vmqos 仅 warn，不影响限速）
-    let intl_token = crate::qos::active_token_plain(&state.db, &state.master_key, host_id, "intl").await.unwrap_or_default();
+    // 国际站可选：未签发留空（vmqos 仅 warn）；已签发但解密失败 = 失败关闭（静默留空会悄悄断掉国际上报）
+    let intl_row: Option<(String,)> = sqlx::query_as(
+        "SELECT token_enc FROM qos_tokens WHERE host_id=? AND purpose='intl' AND status='active'"
+    ).bind(host_id).fetch_optional(&state.db).await?;
+    let intl_token = match intl_row {
+        Some((enc,)) => crate::crypto::decrypt(&enc, &state.master_key)
+            .map_err(|e| anyhow::anyhow!("国际站 token 解密失败（失败关闭）: {}", e))?,
+        None => String::new(),
+    };
     let intl_url = if intl_token.is_empty() { String::new() } else { format!("{}/api/v1/vmqos/intl", base) };
 
     let template: serde_json::Value = match sqlx::query_scalar::<_, i64>("SELECT qos_template_id FROM hosts WHERE id=?")
@@ -567,21 +579,28 @@ async fn qos_config(state: &Arc<AppState>, host_id: i64) -> anyhow::Result<Strin
         _ => crate::qos::builtin_template(),
     };
 
-    Ok(crate::qos::render_config(
+    crate::qos::render_config(
         &format!("{}/api/v1/vmqos/snapshot", base), &snapshot_token,
         &format!("{}/api/v1/vmqos/qos", base), &report_token,
         &intl_url, &intl_token,
         &template,
-    ))
+    )
 }
 
 /// vmqos 安装任务：下载校验 → 安装 → 配置 → systemd；QoS 影响客户 VM 带宽 = fail_closed
 pub async fn qos_install(state: &Arc<AppState>, host_id: i64) -> anyhow::Result<JobSpec> {
     let conf = qos_config(state, host_id).await?;
     let version = get_setting(&state.db, "vmqos_version").await.unwrap_or_else(|| "0.0.6".into());
+    // 值会插值进 shell 命令：版本号严格 semver，下载基址仅允许 https + 安全字符
+    if !version.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-') || version.is_empty() {
+        return Err(anyhow::anyhow!("vmqos_version 格式非法: {}", version));
+    }
     let dl_base = get_setting(&state.db, "vmqos_download_base").await
         .unwrap_or_else(|| "https://github.com/MOSSDATA-NETWORK/vmqos/releases/download".into());
     let dl_base = dl_base.trim().trim_end_matches('/');
+    if !dl_base.starts_with("https://") || dl_base.chars().any(|c| !(c.is_ascii_alphanumeric() || "-._/:~".contains(c))) {
+        return Err(anyhow::anyhow!("vmqos_download_base 非法（仅允许 https URL）"));
+    }
     let fname = format!("vmqos-linux-amd64-v{}", version);
     let dl_cmd = format!(
         "cd /tmp && curl -fsSL --connect-timeout 15 -o {f} '{b}/v{v}/{f}' && curl -fsSL --connect-timeout 15 -o {f}.sums '{b}/v{v}/vmqos-v{v}-SHA256SUMS.txt' && grep ' {f}$' {f}.sums | sha256sum -c -",
@@ -654,7 +673,7 @@ pub fn qos_uninstall() -> JobSpec {
         timeout_secs: 120,
         queue_ttl_secs: 1800,
         steps: vec![step("卸载 vmqos",
-            "systemctl disable --now vmqos 2>/dev/null; rm -f /etc/systemd/system/vmqos.service /opt/vmqos/vmqos /opt/vmqos/config.toml; systemctl daemon-reload; echo '已卸载（保留 /var/lib/vmqos 快照归档）'".into(),
+            "systemctl disable --now vmqos 2>/dev/null; rm -f /etc/systemd/system/vmqos.service /opt/vmqos/vmqos /opt/vmqos/config.toml /opt/vmqos/config.toml.bak /opt/vmqos/config.toml.qosbak; systemctl daemon-reload; echo '已卸载（保留 /var/lib/vmqos 快照归档）'".into(),
             None)],
     }
 }

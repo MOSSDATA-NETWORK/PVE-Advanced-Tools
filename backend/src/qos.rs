@@ -179,18 +179,26 @@ pub async fn record_event(
     limit_mbps: Option<f64>,
 ) -> anyhow::Result<bool> {
     let dedup = token_hash(&format!("{}|{}|{}|{}|{:.2}", host_id, origin, vmid, stage, limit_mbps.unwrap_or(0.0)));
+    // BEGIN IMMEDIATE 立即取写锁：查重+写入同一事务，并发上报不会产生重复行
+    let mut conn = state.db.acquire().await?;
+    sqlx::query("BEGIN IMMEDIATE").execute(&mut *conn).await?;
     let dup: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM qos_events WHERE dedup_hash=? AND reported_at > datetime('now', ?)"
     )
     .bind(&dedup).bind(format!("-{} seconds", DEDUP_WINDOW_SECS))
-    .fetch_one(&state.db).await?;
+    .fetch_one(&mut *conn).await?;
     if dup > 0 {
+        let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
         touch_report(&state.db, host_id).await;
         return Ok(false);
     }
     sqlx::query("INSERT INTO qos_events (host_id, origin, vmid, stage, limit_mbps, dedup_hash) VALUES (?, ?, ?, ?, ?, ?)")
         .bind(host_id).bind(origin).bind(vmid).bind(stage).bind(limit_mbps).bind(&dedup)
-        .execute(&state.db).await?;
+        .execute(&mut *conn).await?;
+    if let Err(e) = sqlx::query("COMMIT").execute(&mut *conn).await {
+        let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
+        return Err(e.into());
+    }
     // stage=0 为删除语义：档位归零但保留状态行（核验端点按 active:false 回应）
     sqlx::query(
         "INSERT INTO qos_vm_state (host_id, origin, vmid, current_stage, current_limit, updated_at) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP) \
@@ -269,6 +277,30 @@ pub fn validate_template(config: &Value) -> Result<(), String> {
             return Err(format!("档位 {} 比例不得高于档位 {}", w[1].0, w[0].0));
         }
     }
+    let max_stage = stages.last().map(|(s, _)| *s).unwrap_or(0);
+    if let Some(cap) = config.get("stage_cap").and_then(|v| v.as_u64()) {
+        if cap > max_stage as u64 {
+            return Err(format!("stage_cap {} 超过已定义最大档位 {}", cap, max_stage));
+        }
+    }
+    if let Some(recover) = config.get("recover_rules") {
+        for key in ["step", "full"] {
+            if let Some(r) = recover.get(key) {
+                if let Some(ratio) = r.get("ratio").and_then(|v| v.as_f64()) {
+                    if ratio <= 0.0 || ratio > 1.0 {
+                        return Err(format!("recover_rules.{}.ratio 须在 (0,1]", key));
+                    }
+                }
+                for sk in ["seconds", "ratio_seconds"] {
+                    if let Some(sec) = r.get(sk).and_then(|v| v.as_f64()) {
+                        if sec <= 0.0 {
+                            return Err(format!("recover_rules.{}.{} 须为正", key, sk));
+                        }
+                    }
+                }
+            }
+        }
+    }
     if let Some(rules) = config.get("raise_rules").and_then(|v| v.as_array()) {
         for r in rules {
             let s = r.get("stage").and_then(|v| v.as_u64()).ok_or("raise_rules 缺 stage")?;
@@ -293,7 +325,15 @@ pub fn render_config(
     intl_url: &str,
     intl_token: &str,
     template: &Value,
-) -> String {
+) -> anyhow::Result<String> {
+    // TOML 注入防护：插值进字符串字面量的入参不得含引号/反斜杠/控制字符
+    for (name, v) in [("snapshot_url", snapshot_url), ("snapshot_token", snapshot_token),
+                      ("report_base", report_base), ("report_token", report_token),
+                      ("intl_url", intl_url), ("intl_token", intl_token)] {
+        if v.chars().any(|c| c == '"' || c == '\\' || c.is_control()) {
+            return Err(anyhow::anyhow!("{} 含非法字符（引号/反斜杠/控制字符）", name));
+        }
+    }
     let ratio = template.get("high_usage_ratio").and_then(|v| v.as_f64()).unwrap_or(0.8);
     let mut limits = String::new();
     if let Some(obj) = template.get("limits").and_then(|v| v.as_object()) {
@@ -320,7 +360,7 @@ pub fn render_config(
     let r_step = recover.get("step").cloned().unwrap_or(json!({}));
     let r_full = recover.get("full").cloned().unwrap_or(json!({}));
 
-    format!(r#"# 由 PVE-Advanced-Tools 平台渲染下发，请勿在节点手工编辑
+    Ok(format!(r#"# 由 PVE-Advanced-Tools 平台渲染下发，请勿在节点手工编辑
 [api]
 url = "{snapshot_url}"
 token = "{snapshot_token}"
@@ -395,7 +435,7 @@ qm_timeout_secs = 30
         full_secs = r_full.get("seconds").and_then(|v| v.as_f64()).unwrap_or(1200.0),
         full_ratio_secs = r_full.get("ratio_seconds").and_then(|v| v.as_f64()).unwrap_or(600.0),
         stage_cap = template.get("stage_cap").and_then(|v| v.as_u64()).unwrap_or(6),
-    )
+    ))
 }
 
 /// 平台内置默认模板（与 vmqos config.toml 默认 [stages] 一致）

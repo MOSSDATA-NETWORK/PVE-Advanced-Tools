@@ -123,24 +123,27 @@ jobs:
           cp artifacts/pve-advanced-tools-linux-aarch64/pve-advanced-tools-linux-aarch64 out/
           cp artifacts/pve-advanced-tools-macos-aarch64/pve-advanced-tools-macos-aarch64 out/
           cd out && sha256sum pve-advanced-tools-* > SHA256SUMS
-      # 可选 ed25519 签名：仓库配置 UPDATE_SIGN_KEY（hex 私钥）secret 后，发布自动附 .sig；
-      # 平台端配置对应公钥 UPDATE_SIGN_PUBKEY 后即强制验签（未配置则拒绝在线更新，失败关闭）
+      # 可选 ed25519 签名：仓库 Secrets 配置 UPDATE_SIGN_KEY（hex 私钥）后，发布自动附 .sig；
+      # 平台端配置对应公钥 UPDATE_SIGN_PUBKEY 后即强制验签（未配置则拒绝在线更新，失败关闭）。
+      # 私钥经 env 传入（不做脚本插值），仅在 secret 非空时执行。
       - name: Sign binaries (optional)
-        if: ${{ vars.UPDATE_SIGN_KEY != '' }}
+        env:
+          UPDATE_SIGN_KEY: ${{ secrets.UPDATE_SIGN_KEY }}
         run: |
+          if [ -z "$UPDATE_SIGN_KEY" ]; then echo "未配置签名私钥，跳过"; exit 0; fi
           cd out
           pip install --quiet pynacl
-          python3 - <<'PYEOF'
-          import glob
+          UPDATE_SIGN_KEY="$UPDATE_SIGN_KEY" python3 - <<'PYEOF'
+          import glob, os
           from nacl.signing import SigningKey
-          key = SigningKey(bytes.fromhex("${{ vars.UPDATE_SIGN_KEY }}".strip()))
+          key = SigningKey(bytes.fromhex(os.environ["UPDATE_SIGN_KEY"].strip()))
           for f in glob.glob("pve-advanced-tools-*"):
               sig = key.sign(open(f, "rb").read()).signature
               open(f + ".sig", "wb").write(sig)
               print("signed", f)
           PYEOF
       - name: Create or update Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@26994186c0ac3ef5cae75ac16aa32e8153525f77 # v1
         with:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}

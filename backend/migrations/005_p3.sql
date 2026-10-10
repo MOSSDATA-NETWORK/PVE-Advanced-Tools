@@ -49,7 +49,7 @@ CREATE TABLE qos_tokens (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     last_used_at DATETIME
 );
-CREATE UNIQUE INDEX idx_qos_tokens_active ON qos_tokens(host_id, purpose) WHERE status != 'revoked';
+CREATE UNIQUE INDEX idx_qos_tokens_active ON qos_tokens(host_id, purpose) WHERE status = 'active';
 CREATE INDEX idx_qos_tokens_hash ON qos_tokens(token_hash);
 
 -- 限速事件流：无单调序号（vmqos 协议限制），按内容哈希 + 时间窗去重
