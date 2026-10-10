@@ -34,7 +34,7 @@ One web console to manage many PVE hosts: **abuse detection + network control + 
 - **Inspection & alerts**: periodic host inspection (disk / memory / load / VM count / component liveness), Telegram & WeCom notifications, deduplicated alert engine
 - **Audit log**: every sensitive operation recorded and searchable
 - **Online update**: GitHub Releases check, SHA256SUMS + ed25519 signature verification (fail-closed), atomic binary swap, automatic SQLite & binary backup, boot self-check with `.bak` rollback
-- **Auth**: password + TOTP 2FA + passkey, login rate limiting, loopback-only initial setup
+- **Auth**: password + TOTP 2FA + passkey, login rate limiting, first-run admin via loopback-only web setup or `INITIAL_ADMIN_*` env bootstrap
 
 ## Requirements
 
