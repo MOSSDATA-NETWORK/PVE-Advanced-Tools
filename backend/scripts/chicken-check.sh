@@ -33,7 +33,7 @@ while [[ $# -gt 0 ]]; do
         --disk) FORCE_DISK=true; shift ;;
         --oneline) ONELINE=true; shift ;;
         --check-agent) echo '{"ok":true,"agent":"installed"}'; exit 0 ;;
-        --version) echo "6"; exit 0 ;;
+        --version) echo "7"; exit 0 ;;
         *) shift ;;
     esac
 done
@@ -165,90 +165,97 @@ custom_ga_checks() {
 # 磁盘挂载检测：复制磁盘→qemu-nbd只读挂载→检查文件系统
 check_vm_disk() {
     local vmid="$1"
-    # 查找磁盘路径（支持 local-lvm 和 dir 存储）
-    local disk_line disk_path
-    disk_line=$(qm config "$vmid" 2>/dev/null | grep -E '^(scsi0|virtio0|sata0|ide0):' | head -1)
-    if [ -z "$disk_line" ]; then
+
+    # 收集全部磁盘（容量降序）：第一台可能是 EFI/ovmf vars 小盘，扫它只会误报 clean
+    local disks=""
+    local line vol sz
+    while IFS= read -r line; do
+        vol=$(echo "$line" | sed 's/^[^:]*: *//; s/,.*//')
+        sz=$(echo "$line" | grep -oE 'size=[0-9]+[KMGT]' | cut -d= -f2)
+        disks="${disks}${sz:-0}|${vol}\n"
+    done < <(qm config "$vmid" 2>/dev/null | grep -E '^(scsi|virtio|sata|ide)[0-9]+:')
+    if [ -z "$disks" ]; then
         echo "error|disk|no_disk_config"; return
     fi
-    local disk_vol
-    disk_vol=$(echo "$disk_line" | sed 's/^[^:]*: *//; s/,.*//')
+    # 容量转 MB 排序（降序），<2048M 的小盘（EFI/vars）跳过
+    local sorted
+    sorted=$(echo -e "$disks" | awk -F'|' '{
+        u=substr($1, length($1)); n=substr($1, 1, length($1)-1)+0;
+        m = (u=="T") ? n*1048576 : (u=="G") ? n*1024 : (u=="M") ? n : int(n/1024);
+        if (m >= 2048) print m"|"$2
+    }' | sort -t'|' -k1 -rn | cut -d'|' -f2)
+    if [ -z "$sorted" ]; then
+        echo "error|disk|no_suitable_disk"; return
+    fi
 
-    local nbd_dev="/dev/nbd1"
     modprobe nbd max_part=8 2>/dev/null || true
-    qemu-nbd --disconnect "$nbd_dev" >/dev/null 2>&1 || true
-    sleep 1
-
-    # 解析实际磁盘文件路径
-    local real_path
-    real_path=$(pvesm path "$disk_vol" 2>/dev/null)
-    if [ -z "$real_path" ]; then
-        echo "error|disk|path_not_found"; return
-    fi
-
-    # LVM 块设备直接连，qcow2/raw 文件也可连
-    if ! qemu-nbd --read-only --connect="$nbd_dev" "$real_path" 2>/dev/null; then
-        echo "error|disk|nbd_failed"; return
-    fi
-    sleep 2
-
     mkdir -p "$MOUNT_POINT"
-    local mounted=0 part
-    # 按文件系统类型选挂载参数：ext 系列用 noload，XFS 用 norecovery（noload 会报错）
-    for part in nbd1p2 nbd1p5 nbd1p3 nbd1p1 nbd1; do
-        local fstype
-        fstype=$(blkid -s TYPE -o value "/dev/$part" 2>/dev/null)
-        [ -z "$fstype" ] && continue
-        local mopts="ro"
-        case "$fstype" in
-            ext2|ext3|ext4) mopts="ro,noload" ;;
-            xfs)            mopts="ro,norecovery" ;;
-            btrfs)          mopts="ro" ;;
-        esac
-        if mount -o "$mopts" "/dev/$part" "$MOUNT_POINT" 2>/dev/null; then
-            mounted=1; break
+
+    local result="error|disk|no_mountable_fs"
+    local disk_vol real_path part fstype mopts mounted
+    for disk_vol in $sorted; do
+        real_path=$(pvesm path "$disk_vol" 2>/dev/null)
+        [ -z "$real_path" ] && continue
+        qemu-nbd --disconnect /dev/nbd1 >/dev/null 2>&1 || true
+        sleep 1
+        if ! qemu-nbd --read-only --connect=/dev/nbd1 "$real_path" 2>/dev/null; then
+            continue
         fi
-        # 兜底：纯只读再试一次
-        if mount -o ro "/dev/$part" "$MOUNT_POINT" 2>/dev/null; then
-            mounted=1; break
+        sleep 2
+        mounted=0
+        # 动态枚举分区（含整盘兜底），vfat 一律跳过（EFI 分区不可能有切鸡特征）
+        for part in $(ls -d /dev/nbd1p* 2>/dev/null) /dev/nbd1; do
+            fstype=$(blkid -s TYPE -o value "$part" 2>/dev/null)
+            [ -z "$fstype" ] && continue
+            [ "$fstype" = "vfat" ] && continue
+            mopts="ro"
+            case "$fstype" in
+                ext2|ext3|ext4) mopts="ro,noload" ;;
+                xfs)            mopts="ro,norecovery" ;;
+                btrfs)          mopts="ro" ;;
+            esac
+            if mount -o "$mopts" "$part" "$MOUNT_POINT" 2>/dev/null || mount -o ro "$part" "$MOUNT_POINT" 2>/dev/null; then
+                mounted=1; break
+            fi
+        done
+
+        if [ $mounted -eq 1 ]; then
+            local found=""
+            [ -d "$MOUNT_POINT/opt/incus" ] && found="${found}incus_dir "
+            [ -e "$MOUNT_POINT/usr/local/bin/incushlii-agent" ] && found="${found}incushlii_agent "
+            [ -d "$MOUNT_POINT/var/lib/incus" ] && found="${found}incus_data "
+            # LXD 需有运营痕迹才计: 已init或有容器/存储池(纯目录是Debian闲置包, 不算)
+            lxd_used=""
+            [ -f "$MOUNT_POINT/var/lib/lxd/lxd.db" ] && lxd_used=1
+            [ -d "$MOUNT_POINT/var/lib/lxd/database" ] && lxd_used=1
+            ls "$MOUNT_POINT/var/lib/lxd/containers" 2>/dev/null | grep -q . && lxd_used=1
+            ls "$MOUNT_POINT/var/lib/lxd/disks" 2>/dev/null | grep -q . && lxd_used=1
+            [ -n "$lxd_used" ] && found="${found}lxd "
+            # NodeHatch 痕迹（zabbly 源是它 install.sh 写入的 Incus 软件源）
+            [ -f "$MOUNT_POINT/etc/apt/sources.list.d/zabbly-incus-stable.sources" ] && found="${found}zabbly_incus "
+            # nodeget-agent 是开源监控 NodeGet 的正常组件，不是切鸡特征，不检测
+            local svc
+            svc=$(ls "$MOUNT_POINT/etc/systemd/system/" 2>/dev/null | grep -ciE "incus|shlii|nodehatch" || true)
+            local det=""
+            [ "${svc:-0}" -gt 0 ] && found="${found}svc:${svc} " \
+              && det="##svc=$(ls "$MOUNT_POINT/etc/systemd/system/" 2>/dev/null | grep -iE "incus|shlii|nodehatch" | sed 's/["\\#|,]/ /g' | tr '\n' ',' | sed 's/,$//')"
+            local hc
+            hc=$(grep -ciE "shlii\.io|incushlii|nodehatch|docs\.nodehatch\.com" "$MOUNT_POINT/root/.bash_history" 2>/dev/null || true)
+            [ "${hc:-0}" -gt 0 ] && found="${found}hist:${hc} " \
+              && det="${det}##hist=$(grep -ihE "shlii\.io|incushlii|nodehatch|docs\.nodehatch\.com" "$MOUNT_POINT/root/.bash_history" 2>/dev/null | sed 's/["\\#|,]/ /g' | cut -c1-100 | tr '\n' ',' | sed 's/,$//')"
+            custom_disk_checks
+            umount "$MOUNT_POINT" 2>/dev/null
+            if [ -n "$found" ]; then
+                result="detected|disk|${found% }${det}"
+            else
+                result="clean|disk|"
+            fi
+            qemu-nbd --disconnect /dev/nbd1 >/dev/null 2>&1 || true
+            break
         fi
+        qemu-nbd --disconnect /dev/nbd1 >/dev/null 2>&1 || true
     done
 
-    local result="error|disk|mount_failed"
-    if [ $mounted -eq 1 ]; then
-        local found=""
-        [ -d "$MOUNT_POINT/opt/incus" ] && found="${found}incus_dir "
-        [ -e "$MOUNT_POINT/usr/local/bin/incushlii-agent" ] && found="${found}incushlii_agent "
-        [ -d "$MOUNT_POINT/var/lib/incus" ] && found="${found}incus_data "
-        # LXD 需有运营痕迹才计: 已init或有容器/存储池(纯目录是Debian闲置包, 不算)
-        lxd_used=""
-        [ -f "$MOUNT_POINT/var/lib/lxd/lxd.db" ] && lxd_used=1
-        [ -d "$MOUNT_POINT/var/lib/lxd/database" ] && lxd_used=1
-        ls "$MOUNT_POINT/var/lib/lxd/containers" 2>/dev/null | grep -q . && lxd_used=1
-        ls "$MOUNT_POINT/var/lib/lxd/disks" 2>/dev/null | grep -q . && lxd_used=1
-        [ -n "$lxd_used" ] && found="${found}lxd "
-        # NodeHatch 痕迹（zabbly 源是它 install.sh 写入的 Incus 软件源）
-        [ -f "$MOUNT_POINT/etc/apt/sources.list.d/zabbly-incus-stable.sources" ] && found="${found}zabbly_incus "
-        # nodeget-agent 是开源监控 NodeGet 的正常组件，不是切鸡特征，不检测
-        local svc
-        svc=$(ls "$MOUNT_POINT/etc/systemd/system/" 2>/dev/null | grep -ciE "incus|shlii|nodehatch" || true)
-        local det=""
-        [ "${svc:-0}" -gt 0 ] && found="${found}svc:${svc} " \
-          && det="##svc=$(ls "$MOUNT_POINT/etc/systemd/system/" 2>/dev/null | grep -iE "incus|shlii|nodehatch" | sed 's/["\\#|,]/ /g' | tr '\n' ',' | sed 's/,$//')"
-        local hc
-        hc=$(grep -ciE "shlii\.io|incushlii|nodehatch|docs\.nodehatch\.com" "$MOUNT_POINT/root/.bash_history" 2>/dev/null || true)
-        [ "${hc:-0}" -gt 0 ] && found="${found}hist:${hc} " \
-          && det="${det}##hist=$(grep -ihE "shlii\.io|incushlii|nodehatch|docs\.nodehatch\.com" "$MOUNT_POINT/root/.bash_history" 2>/dev/null | sed 's/["\\#|,]/ /g' | cut -c1-100 | tr '\n' ',' | sed 's/,$//')"
-        custom_disk_checks
-        umount "$MOUNT_POINT" 2>/dev/null
-        if [ -n "$found" ]; then
-            result="detected|disk|${found% }${det}"
-        else
-            result="clean|disk|"
-        fi
-    fi
-
-    qemu-nbd --disconnect "$nbd_dev" >/dev/null 2>&1 || true
     rmdir "$MOUNT_POINT" 2>/dev/null || true
     echo "$result"
 }

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 /// 当前版本（编译时从 Cargo.toml 读取）
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// 检测脚本版本（脚本内容变化时递增，用于触发自动重新部署）
-pub const SCRIPT_VERSION: &str = "3";
+pub const SCRIPT_VERSION: &str = "7";
 
 /// 更新来源仓库：环境变量 UPDATE_GITHUB_REPO 可覆盖
 pub fn github_repo() -> String {

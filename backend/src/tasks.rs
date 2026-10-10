@@ -295,7 +295,12 @@ pub async fn arpfilter_sync(state: &Arc<AppState>, host_id: i64, mode: &str) -> 
         rerun_safe: true,
     });
     let dest = if mode == "static" { "/usr/local/sbin/pve-arpfilter-static.py" } else { "/usr/local/sbin/pve-arpfilter.py" };
-    steps.push(step("触发调和", format!("{} once", dest), None));
+    let unit = if mode == "static" { "pve-arpfilter-static" } else { "pve-arpfilter" };
+    // 守护进程每轮 reconcile 自动重读白名单/映射：在跑就只需重启立即生效；
+    // 没在跑才用 once（acquire_lock 与 daemon 互斥，直接 once 会撞锁 traceback）
+    steps.push(step("下发并生效",
+        format!("systemctl is-active --quiet {u} && systemctl restart {u} || {d} once", u = unit, d = dest),
+        None));
     Ok(JobSpec {
         kind: format!("arpfilter.sync.{}", mode),
         failure_policy: POLICY_FAIL_OPEN.into(),
