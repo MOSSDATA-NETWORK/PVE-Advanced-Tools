@@ -509,9 +509,39 @@ pub fn optimize_upgrade() -> JobSpec {
     }
 }
 
-/// 内核参数自适应优化（按硬件分档）
-pub fn optimize_tune() -> JobSpec {
-    JobSpec {
+/// 内核参数自适应优化（按硬件分档）；items=None 全量，Some 按选择执行（白名单校验，防命令注入）
+pub const OPTIMIZE_ITEMS: [&str; 12] = [
+    "ulimit", "systemd_limits", "journald", "sysctl", "bbr", "thp",
+    "cpu_governor", "ksm", "io_scheduler", "dmesg", "zfs_arc", "timezone",
+];
+
+pub fn optimize_tune(items: Option<Vec<String>>) -> Result<JobSpec, String> {
+    let only_arg = match &items {
+        None => String::new(),
+        Some(list) => {
+            if list.is_empty() {
+                return Err("至少选择一项优化项".into());
+            }
+            for it in list {
+                if !OPTIMIZE_ITEMS.contains(&it.as_str()) {
+                    return Err(format!("未知优化项: {}", it));
+                }
+            }
+            // 去重（保持顺序），保证步骤标签计数与实际执行一致
+            let mut seen = std::collections::HashSet::new();
+            let deduped: Vec<String> = list.iter().filter(|it| seen.insert(it.clone())).cloned().collect();
+            format!(" --only {}", deduped.join(","))
+        }
+    };
+    let label = match &items {
+        None => "执行优化（全部项）".to_string(),
+        Some(list) => {
+            let mut seen = std::collections::HashSet::new();
+            let deduped: Vec<&String> = list.iter().filter(|it| seen.insert(it.clone())).collect();
+            format!("执行优化（{} 项: {}）", deduped.len(), deduped.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(","))
+        }
+    };
+    Ok(JobSpec {
         kind: "optimize.tune".into(),
         failure_policy: POLICY_FAIL_CLOSED.into(),
         timeout_secs: 600,
@@ -524,10 +554,10 @@ pub fn optimize_tune() -> JobSpec {
                 rollback_command: Some("rm -f /usr/local/sbin/pve-optimize.sh".into()),
                 rerun_safe: true,
             },
-            step("执行优化", "bash /usr/local/sbin/pve-optimize.sh < /dev/null".into(),
+            step(&label, format!("bash /usr/local/sbin/pve-optimize.sh{} < /dev/null", only_arg),
                 Some("echo y | bash /usr/local/sbin/pve-optimize.sh --restore".into())),
         ],
-    }
+    })
 }
 
 /// 回滚（component = nosub / optimize）

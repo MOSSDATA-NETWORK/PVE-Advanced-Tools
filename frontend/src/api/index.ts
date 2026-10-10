@@ -140,7 +140,7 @@ export const dashboardApi = {
 
 export const optimizeApi = {
   init: (hostId: number) => api.post(`/optimize/init/${hostId}`).then(r => r.data),
-  tune: (hostId: number) => api.post(`/optimize/tune/${hostId}`).then(r => r.data),
+  tune: (hostId: number, items?: string[]) => api.post(`/optimize/tune/${hostId}`, items ? { items } : undefined).then(r => r.data),
   rollback: (hostId: number, component: string) => api.post(`/optimize/rollback/${hostId}`, { component }).then(r => r.data),
 }
 

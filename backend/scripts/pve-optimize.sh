@@ -34,6 +34,16 @@ title() { echo -e "\n${CYAN}━━━ $* ━━━${NC}"; }
 REGION="auto"
 BACKUP_DIR="/root/pve-optimize-backup/$(date +%Y%m%d_%H%M%S)"
 
+# 可选择的优化项（--only 白名单）；默认全量
+ALL_ITEMS="ulimit systemd_limits journald sysctl bbr thp cpu_governor ksm io_scheduler dmesg zfs_arc timezone"
+ONLY_ITEMS=""
+
+# 某项是否在本次选择内
+item_selected() {
+    [[ -z "$ONLY_ITEMS" ]] && return 0
+    [[ " $ONLY_ITEMS " == *" $1 "* ]]
+}
+
 # ============================================================
 # 环境检测
 # ============================================================
@@ -222,6 +232,7 @@ backup_configs() {
 # 应用优化：ulimit
 # ============================================================
 apply_ulimit() {
+    item_selected ulimit || return 0
     title "ulimit / 文件描述符调优"
 
     local limits_content
@@ -267,6 +278,7 @@ root     soft   memlock   unlimited
 # 应用优化：systemd limits
 # ============================================================
 apply_systemd_limits() {
+    item_selected systemd_limits || return 0
     title "systemd DefaultLimit 调优"
 
     local sysconf_content="[Manager]
@@ -285,6 +297,7 @@ DefaultLimitMEMLOCK=infinity
 # 应用优化：journald
 # ============================================================
 apply_journald() {
+    item_selected journald || return 0
     title "journald 日志限制"
 
     local journal_content="[Journal]
@@ -301,6 +314,7 @@ RuntimeMaxUse=100M
 # 应用优化：sysctl（核心）
 # ============================================================
 apply_sysctl() {
+    item_selected sysctl || return 0
     title "sysctl 内核参数调优"
 
     local sysctl_content
@@ -410,7 +424,14 @@ EOF
 )
 
     echo "$sysctl_content" > /etc/sysctl.conf
-    sysctl -p /etc/sysctl.conf > /dev/null 2>&1
+    # 部分键在新内核已移除（如 tcp_fack）：sysctl -p 遇到未知键返回非零，逐键降级应用
+    if ! sysctl -p /etc/sysctl.conf > /dev/null 2>&1; then
+        warn "部分 sysctl 键未被当前内核接受，逐键应用可用项："
+        while IFS='=' read -r k v; do
+            [[ "$k" =~ ^[[:space:]]*# ]] || [[ -z "$k" ]] && continue
+            sysctl -w "${k// /}=${v}" > /dev/null 2>&1 || warn "  跳过: ${k// /}"
+        done < /etc/sysctl.conf
+    fi
     info "已写入 /etc/sysctl.conf 并生效"
 }
 
@@ -496,6 +517,7 @@ detect_region() {
 }
 
 apply_timezone() {
+    item_selected timezone || return 0
     title "时区与时间同步"
 
     # 解析区域
@@ -533,6 +555,7 @@ apply_timezone() {
 # 确认 BBR 可用
 # ============================================================
 ensure_bbr() {
+    item_selected bbr || return 0
     title "BBR 拥塞控制检查"
 
     if modprobe tcp_bbr 2>/dev/null; then
@@ -548,6 +571,7 @@ ensure_bbr() {
 # THP（透明大页）优化
 # ============================================================
 apply_thp() {
+    item_selected thp || return 0
     title "THP（透明大页）优化"
 
     local thp_path="/sys/kernel/mm/transparent_hugepage"
@@ -583,6 +607,7 @@ TMPF
 # CPU 调频策略
 # ============================================================
 apply_cpu_governor() {
+    item_selected cpu_governor || return 0
     title "CPU 调频策略"
 
     if ! command -v cpupower &>/dev/null && ! command -v cpufreq-set &>/dev/null; then
@@ -628,6 +653,7 @@ apply_cpu_governor() {
 # KSM（内核同页合并）调优
 # ============================================================
 apply_ksm() {
+    item_selected ksm || return 0
     title "KSM（内存同页合并）调优"
 
     local ksm_path="/sys/kernel/mm/ksm"
@@ -674,6 +700,7 @@ TMPF
 # 磁盘 IO 调度器
 # ============================================================
 apply_io_scheduler() {
+    item_selected io_scheduler || return 0
     title "磁盘 IO 调度器"
 
     local found_disk=false
@@ -744,6 +771,7 @@ apply_io_scheduler() {
 # dmesg 日志缓冲
 # ============================================================
 apply_dmesg() {
+    item_selected dmesg || return 0
     title "dmesg 日志缓冲"
 
     # 根据内存大小设不同的 buffer
@@ -771,6 +799,7 @@ apply_dmesg() {
 # ZFS ARC 限制
 # ============================================================
 apply_zfs_arc() {
+    item_selected zfs_arc || return 0
     title "ZFS ARC 内存限制"
 
     # 检测是否使用了 ZFS
@@ -1011,6 +1040,19 @@ main() {
                         ;;
                 esac
                 ;;
+            --only)
+                shift
+                ONLY_ITEMS="${1:-}"
+                [[ -z "$ONLY_ITEMS" ]] && { error "--only 不能为空"; exit 1; }
+                # 拒绝空字段（,,、首尾逗号），避免「看起来选了实际没跑」
+                case "$ONLY_ITEMS" in *,,*|,*|*,) error "--only 含空项: $ONLY_ITEMS"; exit 1;; esac
+                # 逗号转空格；逐项校验白名单
+                ONLY_ITEMS="${ONLY_ITEMS//,/ }"
+                ONLY_ITEMS="$(echo "$ONLY_ITEMS" | tr -s ' ' | sed 's/^ //; s/ $//')"
+                for it in $ONLY_ITEMS; do
+                    [[ " $ALL_ITEMS " == *" $it "* ]] || { error "未知优化项: ${it}（可选: ${ALL_ITEMS}）"; exit 1; }
+                done
+                ;;
             --help|-h)
                 echo "用法: $0 [选项]"
                 echo ""
@@ -1019,6 +1061,8 @@ main() {
                 echo "  --region <区域>    NTP 服务器区域: cn / hk / intl"
                 echo "                     时区始终为北京时间 (Asia/Shanghai)"
                 echo "                     默认 auto（根据当前时区自动检测）"
+                echo "  --only <项,...>    只执行指定优化项（逗号分隔），默认全部"
+                echo "                     可选: $ALL_ITEMS"
                 echo "  --help, -h         显示帮助"
                 echo ""
                 echo "示例:"
@@ -1041,6 +1085,8 @@ main() {
     calc_params
     backup_configs
 
+    [[ -n "$ONLY_ITEMS" ]] && info "本次仅执行: $ONLY_ITEMS"
+    # 注意：必须无条件调用（选择判断在各函数内部）——用 cond && func 或 if 包裹会让函数体内的 set -e 失效
     apply_ulimit
     apply_systemd_limits
     apply_journald

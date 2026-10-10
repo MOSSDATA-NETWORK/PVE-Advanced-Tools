@@ -22,6 +22,8 @@ async fn enqueue(state: &Arc<AppState>, jar: &CookieJar, host_id: i64, spec: cra
 pub struct BatchRequest {
     pub action: String,
     pub host_ids: Option<Vec<i64>>,
+    /// tune 可选：只执行选中的优化项（None = 全部）
+    pub items: Option<Vec<String>>,
 }
 
 pub async fn batch(State(state): State<Arc<AppState>>, jar: CookieJar, Json(body): Json<BatchRequest>) -> Json<Value> {
@@ -38,7 +40,10 @@ pub async fn batch(State(state): State<Arc<AppState>>, jar: CookieJar, Json(body
     for host in &targets {
         let spec = match body.action.as_str() {
             "init" => crate::tasks::optimize_init(),
-            "tune" => crate::tasks::optimize_tune(),
+            "tune" => match crate::tasks::optimize_tune(body.items.clone()) {
+                Ok(s) => s,
+                Err(e) => return Json(json!({"ok": false, "error": e})),
+            },
             _ => return Json(json!({"ok": false, "error": "action 必须为 init 或 tune"})),
         };
         match crate::jobs::create_and_enqueue(&state, host.id, spec, &actor).await {
@@ -61,9 +66,19 @@ pub async fn upgrade(State(state): State<Arc<AppState>>, jar: CookieJar, Path(ho
     enqueue(&state, &jar, host_id, crate::tasks::optimize_upgrade(), "optimize.upgrade").await
 }
 
-/// 内核参数自适应优化
-pub async fn tune(State(state): State<Arc<AppState>>, jar: CookieJar, Path(host_id): Path<i64>) -> Json<Value> {
-    enqueue(&state, &jar, host_id, crate::tasks::optimize_tune(), "optimize.tune").await
+/// 内核参数自适应优化；body 可选 {items: [...]}，缺省全量
+#[derive(Deserialize)]
+pub struct TuneRequest {
+    pub items: Option<Vec<String>>,
+}
+
+pub async fn tune(State(state): State<Arc<AppState>>, jar: CookieJar, Path(host_id): Path<i64>, body: Option<Json<TuneRequest>>) -> Json<Value> {
+    let items = body.and_then(|b| b.0.items);
+    let spec = match crate::tasks::optimize_tune(items) {
+        Ok(s) => s,
+        Err(e) => return Json(json!({"ok": false, "error": e})),
+    };
+    enqueue(&state, &jar, host_id, spec, "optimize.tune").await
 }
 
 #[derive(Deserialize)]
