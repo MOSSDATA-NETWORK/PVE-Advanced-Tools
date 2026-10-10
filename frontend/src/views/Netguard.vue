@@ -131,7 +131,7 @@ function componentBadge(hostId: number) {
     <div v-if="loading" style="text-align: center; padding: 40px;"><div class="spinner" style="margin: 0 auto;"></div></div>
     <template v-else>
       <!-- 生效范围 -->
-      <div class="card" style="margin-bottom: 16px;">
+      <div class="card" id="scope" style="margin-bottom: 16px;">
         <h3 style="margin: 0 0 12px; font-size: 16px;">生效范围（按宿主机）</h3>
         <div class="table-container">
           <table>
@@ -152,7 +152,7 @@ function componentBadge(hostId: number) {
       </div>
 
       <!-- 端口封堵 -->
-      <div class="card" style="margin-bottom: 16px;">
+      <div class="card" id="ports" style="margin-bottom: 16px;">
         <h3 style="margin: 0 0 12px; font-size: 16px;">端口封堵列表</h3>
         <div class="table-container">
           <table>
@@ -180,7 +180,7 @@ function componentBadge(hostId: number) {
       <!-- 域名拦截 -->
       <div class="card" style="margin-bottom: 16px;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-          <h3 style="margin: 0; font-size: 16px;">域名拦截列表</h3>
+          <h3 style="margin: 0; font-size: 16px;" id="domains">域名拦截列表</h3>
           <button class="btn btn-sm btn-secondary" @click="showImport = !showImport">批量导入</button>
         </div>
         <div v-if="showImport" style="margin-bottom: 12px;">
@@ -210,7 +210,7 @@ function componentBadge(hostId: number) {
       </div>
 
       <!-- VM 白名单 -->
-      <div class="card">
+      <div class="card" id="whitelist">
         <h3 style="margin: 0 0 12px; font-size: 16px;">VM 白名单豁免（按 VMID，guest 无法伪造）</h3>
         <div class="table-container">
           <table>

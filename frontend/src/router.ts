@@ -3,6 +3,15 @@ import axios from 'axios'
 
 const router = createRouter({
   history: createWebHistory(),
+  // 二级菜单 hash 锚点滚动（等目标组件渲染后再滚）
+  scrollBehavior(to) {
+    if (to.hash) {
+      return new Promise((resolve) => {
+        setTimeout(() => resolve({ el: to.hash, behavior: 'smooth', top: 80 }), 150)
+      })
+    }
+    return { top: 0 }
+  },
   routes: [
     // 不带侧边栏的页面
     { path: '/setup', name: 'setup', component: () => import('./views/Setup.vue') },

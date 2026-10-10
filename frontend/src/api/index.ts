@@ -129,3 +129,7 @@ export const qosApi = {
   uninstall: (hostId: number) => api.post(`/qos/uninstall/${hostId}`).then(r => r.data),
   status: (hostId: number) => api.post(`/qos/status/${hostId}`).then(r => r.data),
 }
+
+export const dashboardApi = {
+  overview: () => api.get('/dashboard').then(r => r.data),
+}

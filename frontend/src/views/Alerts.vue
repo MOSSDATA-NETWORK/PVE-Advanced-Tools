@@ -104,7 +104,7 @@ function changePage(p: number) {
     </div>
 
     <!-- 巡检设置 -->
-    <div class="card" style="margin-bottom: 16px;">
+    <div class="card" id="inspect" style="margin-bottom: 16px;">
       <h3 style="margin: 0 0 12px; font-size: 16px;">定时巡检（检测组件存活 + 资源水位）</h3>
       <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
         <label style="display: flex; align-items: center; gap: 6px; font-size: 14px;">
@@ -123,7 +123,7 @@ function changePage(p: number) {
     </div>
 
     <!-- 告警规则 -->
-    <div class="card" style="margin-bottom: 16px;">
+    <div class="card" id="rules" style="margin-bottom: 16px;">
       <h3 style="margin: 0 0 12px; font-size: 16px;">告警规则</h3>
       <div class="table-container">
         <table>
@@ -155,7 +155,7 @@ function changePage(p: number) {
     </div>
 
     <!-- 告警历史 -->
-    <div class="card">
+    <div class="card" id="history">
       <h3 style="margin: 0 0 12px; font-size: 16px;">告警历史</h3>
       <div v-if="loading" style="text-align: center; padding: 40px;"><div class="spinner" style="margin: 0 auto;"></div></div>
       <div v-else-if="!history.length" class="empty-state"><p>暂无告警</p></div>

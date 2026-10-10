@@ -352,7 +352,7 @@ async function deletePasskey() {
     <!-- Account Settings -->
     <div class="card" style="margin-bottom: 16px;">
       <div class="card-header">
-        <h3>账户设置</h3>
+        <h3 id="account">账户设置</h3>
       </div>
       <div class="settings-grid">
         <div class="settings-item" @click="openChangePassword">
@@ -414,7 +414,7 @@ async function deletePasskey() {
     <!-- Version Card -->
     <div class="card" style="margin-bottom: 16px;">
       <div class="card-header">
-        <h3>版本信息</h3>
+        <h3 id="about">版本信息</h3>
       </div>
       <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px;">
         <div>
@@ -491,7 +491,7 @@ async function deletePasskey() {
       </div>
     </div>
 
-    <div class="card">
+    <div class="card" id="notify">
       <div v-if="loading" style="text-align: center; padding: 40px;">
         <div class="spinner" style="margin: 0 auto;"></div>
       </div>

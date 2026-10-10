@@ -2,6 +2,7 @@ pub mod alerts;
 pub mod arp;
 pub mod audit;
 pub mod auth;
+pub mod dashboard;
 pub mod hosts;
 pub mod jobs;
 pub mod netguard;
@@ -56,6 +57,7 @@ pub fn routes(state: Arc<AppState>) -> Router {
         .route("/jobs/{id}", get(jobs::get))
         .route("/jobs/{id}/retry", post(jobs::retry))
         .route("/audit", get(audit::list))
+        .route("/dashboard", get(dashboard::overview))
         .route("/netguard/ports", get(netguard::list_ports).post(netguard::create_port))
         .route("/netguard/ports/{id}", axum::routing::delete(netguard::delete_port))
         .route("/netguard/ports/{id}/toggle", post(netguard::toggle_port))

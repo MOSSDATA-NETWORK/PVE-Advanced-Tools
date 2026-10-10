@@ -1,8 +1,18 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { qosApi, hostsApi } from '../api'
 
-const tab = ref<'policies' | 'templates' | 'events' | 'nodes'>('nodes')
+const route = useRoute()
+const tab = ref<string>(
+  ['policies', 'templates', 'events', 'nodes', 'access'].includes(route.query.tab as string)
+    ? (route.query.tab as string) : 'nodes')
+watch(() => route.query.tab, (t) => {
+  if (t && ['policies', 'templates', 'events', 'nodes', 'access'].includes(t as string)) {
+    tab.value = t as string
+    if (t === 'events') loadEvents()
+  }
+})
 const hosts = ref<any[]>([])
 const nodes = ref<any[]>([])
 const templates = ref<any[]>([])
@@ -124,10 +134,10 @@ const purposeLabel: Record<string, string> = { snapshot: '快照', report: '上�
     <div v-if="notice" :class="notice.ok ? 'notice-ok' : 'notice-err'" style="margin-bottom: 12px;">{{ notice.text }}</div>
 
     <div style="display: flex; gap: 8px; margin-bottom: 16px;">
-      <button v-for="t in (['nodes', 'policies', 'templates', 'events'] as const)" :key="t"
+      <button v-for="t in (['nodes', 'policies', 'templates', 'events', 'access'] as const)" :key="t"
         class="btn" :class="tab === t ? 'btn-primary' : 'btn-secondary'"
         @click="tab = t; t === 'events' && loadEvents()">
-        {{ { nodes: '节点状态', policies: '带宽策略', templates: '档位模板', events: '限速事件流' }[t] }}
+        {{ { nodes: '节点状态', policies: '带宽策略', templates: '档位模板', events: '限速事件流', access: '快照 API 接入' }[t] }}
       </button>
     </div>
 
@@ -153,40 +163,13 @@ const purposeLabel: Record<string, string> = { snapshot: '快照', report: '上�
               <button class="btn btn-sm btn-primary" @click="action(qosApi.install, n.host_id, '安装')">安装</button>
               <button class="btn btn-sm btn-secondary" @click="action(qosApi.configApply, n.host_id, '配置下发')">下发配置</button>
               <button class="btn btn-sm btn-secondary" @click="action(qosApi.status, n.host_id, '状态回采')">状态</button>
-              <button class="btn btn-sm btn-secondary" @click="showTokens(n.host_id)">Token</button>
+              <button class="btn btn-sm btn-secondary" @click="tab = 'access'; showTokens(n.host_id)">Token</button>
               <button class="btn btn-sm btn-secondary" @click="action(qosApi.uninstall, n.host_id, '卸载')">卸载</button>
             </td>
           </tr>
           <tr v-if="!nodes.length"><td colspan="7" style="text-align: center; color: #888;">暂无 QoS 节点——先在下方「Token」签发接入凭据并安装</td></tr>
         </tbody>
       </table>
-
-      <div v-if="tokenPanel" class="card" style="margin-top: 12px; background: #f8f9fa;">
-        <h4>接入 Token — {{ hostMap[tokenPanel.host_id] }}</h4>
-        <table>
-          <thead><tr><th>用途</th><th>状态</th><th>签发时间</th><th>最近使用</th></tr></thead>
-          <tbody>
-            <tr v-for="t in tokenPanel.tokens" :key="t.id">
-              <td>{{ purposeLabel[t.purpose] || t.purpose }}</td>
-              <td>{{ t.status === 'active' ? '生效' : '轮换中（下次配置下发后撤销）' }}</td>
-              <td>{{ t.created_at }}</td>
-              <td>{{ t.last_used_at || '—' }}</td>
-            </tr>
-          </tbody>
-        </table>
-        <div style="margin-top: 8px;">
-          <button class="btn btn-sm btn-secondary" @click="issueToken(tokenPanel.host_id, 'snapshot')">签发/轮换快照 token</button>
-          <button class="btn btn-sm btn-secondary" @click="issueToken(tokenPanel.host_id, 'report')">签发/轮换上报 token</button>
-          <button class="btn btn-sm btn-secondary" @click="issueToken(tokenPanel.host_id, 'intl')">签发/轮换国际站 token</button>
-          <button class="btn btn-sm btn-secondary" @click="tokenPanel = null">关闭</button>
-        </div>
-      </div>
-
-      <div v-if="tokenResult" class="card" style="margin-top: 12px; background: #fff8e6;">
-        <h4>新 token（{{ purposeLabel[tokenResult.purpose] }}）——仅此一次显示，请立即复制：</h4>
-        <code style="word-break: break-all;">{{ tokenResult.token }}</code>
-        <div style="margin-top: 8px;"><button class="btn btn-sm btn-secondary" @click="tokenResult = null">我已保存</button></div>
-      </div>
     </div>
 
     <!-- 带宽策略 -->
@@ -276,6 +259,48 @@ const purposeLabel: Record<string, string> = { snapshot: '快照', report: '上�
           <tr v-if="!events.length"><td colspan="6" style="text-align: center; color: #888;">暂无事件</td></tr>
         </tbody>
       </table>
+    </div>
+
+    <!-- 快照 API 接入 -->
+    <div v-if="tab === 'access'" class="card">
+      <h3 style="margin-bottom: 8px;">快照 API 接入（vmqos 节点凭据签发与轮换）</h3>
+      <p style="color: #888; margin-bottom: 12px;">
+        节点 vmqos 配置中的接入地址：<code>平台地址/api/v1/vmqos/snapshot</code>（快照）、<code>平台地址/api/v1/vmqos/qos</code>（上报）。
+        轮换采用重叠期：新 token 签发后旧 token 仍可用，「下发配置」成功后旧 token 自动撤销。
+      </p>
+      <div style="margin-bottom: 12px;">
+        <select class="form-input" style="width: 200px;" @change="showTokens(Number(($event.target as any).value))">
+          <option value="">选择主机管理 token</option>
+          <option v-for="h in hosts" :key="h.id" :value="h.id">{{ h.name }}（{{ h.host }}）</option>
+        </select>
+      </div>
+
+      <div v-if="tokenPanel">
+        <h4>接入 Token — {{ hostMap[tokenPanel.host_id] }}</h4>
+        <table>
+          <thead><tr><th>用途</th><th>状态</th><th>签发时间</th><th>最近使用</th></tr></thead>
+          <tbody>
+            <tr v-for="t in tokenPanel.tokens" :key="t.id">
+              <td>{{ purposeLabel[t.purpose] || t.purpose }}</td>
+              <td>{{ t.status === 'active' ? '生效' : '轮换中（下次配置下发后撤销）' }}</td>
+              <td>{{ t.created_at }}</td>
+              <td>{{ t.last_used_at || '—' }}</td>
+            </tr>
+            <tr v-if="!tokenPanel.tokens.length"><td colspan="4" style="text-align: center; color: #888;">尚未签发</td></tr>
+          </tbody>
+        </table>
+        <div style="margin-top: 8px;">
+          <button class="btn btn-sm btn-secondary" @click="issueToken(tokenPanel.host_id, 'snapshot')">签发/轮换快照 token</button>
+          <button class="btn btn-sm btn-secondary" @click="issueToken(tokenPanel.host_id, 'report')">签发/轮换上报 token</button>
+          <button class="btn btn-sm btn-secondary" @click="issueToken(tokenPanel.host_id, 'intl')">签发/轮换国际站 token</button>
+        </div>
+      </div>
+
+      <div v-if="tokenResult" class="card" style="margin-top: 12px; background: #fff8e6;">
+        <h4>新 token（{{ purposeLabel[tokenResult.purpose] }}）——仅此一次显示，请立即复制：</h4>
+        <code style="word-break: break-all;">{{ tokenResult.token }}</code>
+        <div style="margin-top: 8px;"><button class="btn btn-sm btn-secondary" @click="tokenResult = null">我已保存</button></div>
+      </div>
     </div>
   </div>
 </template>

@@ -119,7 +119,7 @@ function modeLabel(m: string | undefined) {
       <span style="font-size: 14px;">{{ notice.text }}</span>
     </div>
 
-    <div class="card">
+    <div class="card" id="mode">
       <div v-if="loading" style="text-align: center; padding: 40px;"><div class="spinner" style="margin: 0 auto;"></div></div>
       <div v-else class="table-container">
         <table>
