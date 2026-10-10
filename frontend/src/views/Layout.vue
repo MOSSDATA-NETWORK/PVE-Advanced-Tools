@@ -20,7 +20,6 @@ const navGroups: NavGroup[] = [
     name: 'hosts', label: '宿主机管理', icon: 'hosts',
     children: [
       { label: '主机列表', path: '/hosts' },
-      { label: '添加主机', path: '/hosts?add=1' },
       { label: '任务中心', path: '/jobs' },
     ],
   },
