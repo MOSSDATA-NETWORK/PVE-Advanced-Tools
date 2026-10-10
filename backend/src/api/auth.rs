@@ -32,15 +32,6 @@ fn extract_ip(headers: &HeaderMap, peer: &std::net::SocketAddr) -> Option<String
     Some(peer.ip().to_string())
 }
 
-/// 判断请求是否经过反代（有 X-Forwarded-For 说明不是直连）
-fn has_proxy_header(headers: &HeaderMap) -> bool {
-    // 覆盖常见受信代理头：本机反代漏配任意一个都不能放行 Setup
-    headers.get("x-forwarded-for").is_some()
-        || headers.get("x-real-ip").is_some()
-        || headers.get("x-forwarded-host").is_some()
-        || headers.get("forwarded").is_some()
-}
-
 #[derive(Deserialize)]
 pub struct LoginRequest {
     pub username: String,
@@ -89,14 +80,9 @@ pub async fn setup(
         return (jar, Json(json!({"ok": false, "error": "管理员已存在，请直接登录"})));
     }
 
-    // 仅允许回环地址直连（含本机反代）：0.0.0.0 监听下外部直连无法抢建管理员
-    if !addr.ip().is_loopback() {
-        return (jar, Json(json!({"ok": false, "error": "首次设置仅允许本机访问"})));
-    }
-    if has_proxy_header(&headers) {
-        return (jar, Json(json!({"ok": false, "error": "首次设置请通过本机访问"})));
-    }
-
+    // 初始化页面对外开放（用户决策 2026-10-10：接受部署后到初始化前的抢建窗口，
+    // 被抢先可重装）；is_initialized 上面的检查保证只有一次机会。
+    // 保留限流（复用登录限流器）防爆破。
     let client_ip = extract_ip(&headers, &addr);
 
     match crate::auth::setup_admin(&state.db, &body.username, &body.password, body.enable_totp.unwrap_or(false)).await {
