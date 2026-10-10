@@ -6,6 +6,12 @@
 set -euo pipefail
 
 PORT="${1:-3210}"
+case "$PORT" in
+  ''|*[!0-9]*) echo "❌ 端口必须是数字"; exit 1 ;;
+esac
+if [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; then
+  echo "❌ 端口须在 1-65535"; exit 1
+fi
 INSTALL_DIR="/opt/pve-advanced-tools"
 SERVICE_NAME="pve-advanced-tools"
 BINARY_NAME="pve-advanced-tools"

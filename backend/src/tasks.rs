@@ -744,7 +744,7 @@ pub fn qos_uninstall() -> JobSpec {
         timeout_secs: 120,
         queue_ttl_secs: 1800,
         steps: vec![step("卸载 vmqos",
-            "systemctl disable --now vmqos 2>/dev/null; rm -f /etc/systemd/system/vmqos.service /opt/vmqos/vmqos /opt/vmqos/config.toml /opt/vmqos/config.toml.bak /opt/vmqos/config.toml.qosbak; systemctl daemon-reload; echo '已卸载（保留 /var/lib/vmqos 快照归档）'".into(),
+            "systemctl disable --now vmqos 2>/dev/null; rm -f /etc/systemd/system/vmqos.service /opt/vmqos/vmqos /opt/vmqos/vmqos.bak /opt/vmqos/config.toml /opt/vmqos/config.toml.bak /opt/vmqos/config.toml.qosbak; systemctl daemon-reload; echo '已卸载（保留 /var/lib/vmqos 快照归档）'".into(),
             None)],
     }
 }

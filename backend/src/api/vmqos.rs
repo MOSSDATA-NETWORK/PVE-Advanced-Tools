@@ -120,9 +120,16 @@ async fn report(state: Arc<AppState>, headers: HeaderMap, body: Option<Value>) -
     // 非 0 档仅接受有启用策略的 VM（防 token 泄露后任意 VMID 刷事件）；
     // 0 档（删除）放行——策略刚被管理员移除时的在途删除上报仍需闭环
     if stage > 0 {
-        let known: i64 = sqlx::query_scalar(
+        // DB 错误不得当「无策略」吞掉（vmqos 会误以为已接受）：返回可重试 500
+        let known = match sqlx::query_scalar::<_, i64>(
             "SELECT COUNT(*) FROM qos_policies WHERE host_id=? AND vmid=? AND origin='domestic' AND enabled=1"
-        ).bind(host.id).bind(&vmid).fetch_one(&state.db).await.unwrap_or(0);
+        ).bind(host.id).bind(&vmid).fetch_one(&state.db).await {
+            Ok(n) => n,
+            Err(e) => {
+                tracing::error!("策略查询失败 host={}: {}", host.id, e);
+                return (StatusCode::INTERNAL_SERVER_ERROR, Json(err_body("INTERNAL", "查询失败", true)));
+            }
+        };
         if known == 0 {
             return (StatusCode::OK, Json(json!({"ok": true, "ignored": "no active policy"})));
         }
@@ -210,15 +217,29 @@ pub async fn intl_entry(
             return (StatusCode::FORBIDDEN, Json(json!({"ok": false, "error": "host_ip 与主机不匹配"})));
         }
         // cluster_id 须与主机集群一致；非 0 档须有启用的国际源策略
-        let host_cluster: i64 = sqlx::query_scalar("SELECT COALESCE(cluster_id, 1) FROM hosts WHERE id=?")
-            .bind(host.id).fetch_one(&state.db).await.unwrap_or(1);
-        if body.get("cluster_id").and_then(|v| v.as_i64()).map(|c| c != host_cluster).unwrap_or(false) {
-            return (StatusCode::FORBIDDEN, Json(json!({"ok": false, "error": "cluster_id 与主机集群不匹配"})));
+        let host_cluster = match sqlx::query_scalar::<_, i64>("SELECT COALESCE(cluster_id, 1) FROM hosts WHERE id=?")
+            .bind(host.id).fetch_one(&state.db).await {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::error!("集群查询失败 host={}: {}", host.id, e);
+                return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"ok": false, "error": "查询失败，请重试"})));
+            }
+        };
+        // cluster_id 必须显式携带且与主机集群一致（缺失/类型错/不符一律拒绝）
+        match body.get("cluster_id").and_then(|v| v.as_i64()) {
+            Some(c) if c == host_cluster => {}
+            _ => return (StatusCode::FORBIDDEN, Json(json!({"ok": false, "error": "cluster_id 缺失或与主机集群不匹配"}))),
         }
         if stage > 0 {
-            let known: i64 = sqlx::query_scalar(
+            let known = match sqlx::query_scalar::<_, i64>(
                 "SELECT COUNT(*) FROM qos_policies WHERE host_id=? AND vmid=? AND origin='international' AND enabled=1"
-            ).bind(host.id).bind(&vmid).fetch_one(&state.db).await.unwrap_or(0);
+            ).bind(host.id).bind(&vmid).fetch_one(&state.db).await {
+                Ok(n) => n,
+                Err(e) => {
+                    tracing::error!("intl 策略查询失败 host={}: {}", host.id, e);
+                    return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"ok": false, "error": "查询失败，请重试"})));
+                }
+            };
             if known == 0 {
                 return (StatusCode::OK, Json(json!({"ok": true, "ignored": "no active policy"})));
             }
@@ -238,10 +259,16 @@ pub async fn intl_entry(
         return (StatusCode::BAD_REQUEST, Json(json!({"ok": false, "error": "缺少 vmid"})));
     };
     // cluster_id 须与主机所属集群一致（防 token 跨集群查询）
-    let host_cluster: i64 = sqlx::query_scalar("SELECT COALESCE(cluster_id, 1) FROM hosts WHERE id=?")
-        .bind(host.id).fetch_one(&state.db).await.unwrap_or(1);
-    if q.cluster_id.map(|c| c != host_cluster).unwrap_or(false) {
-        return (StatusCode::FORBIDDEN, Json(json!({"ok": false, "error": "cluster_id 与主机集群不匹配"})));
+    let host_cluster = match sqlx::query_scalar::<_, i64>("SELECT COALESCE(cluster_id, 1) FROM hosts WHERE id=?")
+        .bind(host.id).fetch_one(&state.db).await {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!("集群查询失败 host={}: {}", host.id, e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"ok": false, "error": "查询失败，请重试"})));
+        }
+    };
+    if q.cluster_id.map(|c| c != host_cluster).unwrap_or(true) {
+        return (StatusCode::FORBIDDEN, Json(json!({"ok": false, "error": "cluster_id 缺失或与主机集群不匹配"})));
     }
     let row = match sqlx::query_as::<_, (i64,)>(
         "SELECT current_stage FROM qos_vm_state WHERE host_id=? AND vmid=? AND origin='international'"
