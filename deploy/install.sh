@@ -148,7 +148,8 @@ if systemctl is-active --quiet "$SERVICE_NAME"; then
     echo "重启服务: systemctl restart $SERVICE_NAME"
     echo "停止服务: systemctl stop $SERVICE_NAME"
     echo ""
-    echo "首次访问请完成初始化设置（管理员用户名 + 密码）"
+    echo "首次访问请完成初始化：设置管理员用户名和密码，并绑定 TOTP 或 Passkey（二选一，必选）"
+    echo "Passkey 需要通过 HTTPS 域名访问面板（IP 或 HTTP 不可用），详见 README"
 else
     echo ""
     echo "❌ 服务启动失败，查看日志："

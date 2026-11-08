@@ -34,7 +34,7 @@ One web console to manage many PVE hosts: **abuse detection + network control + 
 - **Inspection & alerts**: periodic host inspection (disk / memory / load / VM count / component liveness), Telegram & WeCom notifications, deduplicated alert engine
 - **Audit log**: every sensitive operation recorded and searchable
 - **Online update**: GitHub Releases check, SHA256SUMS + ed25519 signature verification (fail-closed), atomic binary swap, automatic SQLite & binary backup, boot self-check with `.bak` rollback
-- **Auth**: password + TOTP 2FA + passkey, login rate limiting, first-run admin via loopback-only web setup or `INITIAL_ADMIN_*` env bootstrap
+- **Auth**: password + TOTP, or a passkey alone; one of the two must be bound during setup; login rate limiting; first-run admin via the web setup (open until the first admin exists) or `INITIAL_ADMIN_*` env bootstrap
 
 ## Requirements
 
@@ -83,10 +83,12 @@ The installer:
 1. **Environment bootstrap (recommended for headless servers)**: set `INITIAL_ADMIN_USERNAME=admin` and
    `INITIAL_ADMIN_PASSWORD=<strong-password>` before first start (with install.sh, append them to
    `/opt/pve-advanced-tools/env`). The account is created on first boot — **remove both variables and restart afterwards**.
-2. **SSH tunnel**: `ssh -L 3210:127.0.0.1:3210 root@server`, then open `http://127.0.0.1:3210` for the web setup
-   (the web setup endpoint is loopback-only so nobody can race you to create the admin once the domain is live).
+   That admin must bind TOTP or a passkey at its first sign-in.
+2. **Web setup**: open `http://<server or domain>:3210`. The page asks for a username and password, then requires binding TOTP or a passkey.
+   Anyone can reach the setup page until the first admin exists; finish it right after deployment.
+   To use a tunnel instead: `ssh -L 3210:127.0.0.1:3210 root@server`, then open `http://127.0.0.1:3210`.
 
-After initialization, everyday access through your reverse-proxied domain is unrestricted.
+After initialization, everyday access through your reverse-proxied domain is unrestricted. TOTP or a passkey is bound during setup (one of the two); the other can be added later in Settings as a backup.
 
 ### Configuration (environment variables)
 
@@ -96,6 +98,8 @@ After initialization, everyday access through your reverse-proxied domain is unr
 | `DATABASE_URL` | `sqlite:pve-advanced-tools.db?mode=rwc` | SQLite path |
 | `PORT` / `HOST` | `3210` / `0.0.0.0` | Listen address |
 | `TLS_CERT` / `TLS_KEY` | — | Direct TLS; or set `BEHIND_TLS_PROXY=1` behind an HTTPS reverse proxy |
+| `RP_ORIGIN` | the address the browser uses | Optional. Pins the only panel address accepted for passkeys, e.g. `https://pve.example.com` |
+| `RP_ID` | the panel's domain | Optional. Passkey domain; must equal the panel's domain or a parent domain, e.g. `example.com` |
 | `STATIC_DIR` | `static` | Frontend assets |
 | `DATA_DIR` | `data` | Runtime files (managed `known_hosts`) |
 | `UPDATE_SIGN_PUBKEY` | — | ed25519 public key (hex) for update signature verification. If set, releases must carry a valid `.sig`; if unset, online update is refused (fail-closed) |
@@ -103,6 +107,10 @@ After initialization, everyday access through your reverse-proxied domain is unr
 | `UPDATE_GITHUB_REPO` | `MOSSDATA-NETWORK/PVE-Advanced-Tools` | Update source |
 | `platform_public_url` (panel setting) | — | Node-reachable platform URL, required before pushing vmqos configs |
 | `github_mirror_token` (panel setting) | — | GitHub token used when vmqos is a private repo; nodes then download the binary through the platform proxy (stored encrypted, masked in UI) |
+
+### Passkey
+
+Passkeys need the panel opened through a domain over HTTPS (or `http://localhost` on the same machine) — IP addresses and plain HTTP do not work. Behind a reverse proxy, the browser's `Origin` header must reach the backend unchanged (the provided nginx config does). Each passkey is bound to the exact address (scheme, domain, port) it was registered on — after changing that address, sign in with password + TOTP and register again, so keeping TOTP as a backup is recommended.
 
 ## Quick start
 
@@ -113,6 +121,8 @@ After initialization, everyday access through your reverse-proxied domain is unr
 5. **告警与巡检**: configure Telegram / WeCom channels, tune inspection interval and alert rules
 
 ## Update & rollback
+
+**Upgrading:** after upgrading to this version everyone is signed out once; accounts without TOTP or a passkey must bind one at the next sign-in. Update the frontend static files together with the binary (the in-app updater replaces only the binary).
 
 - **Panel**: Settings → check for updates → one-click update (SHA256SUMS + ed25519 signature enforced)
 - **Rollback**: restore `<binary>.bak` and `<db>.bak` (both written next to the originals before every update), then restart the service

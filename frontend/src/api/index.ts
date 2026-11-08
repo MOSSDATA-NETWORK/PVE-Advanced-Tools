@@ -67,7 +67,6 @@ export const hostkeyApi = {
 
 export const authApi = {
   changePassword: (data: { old_password: string; new_password: string }) => api.post('/auth/password', data).then(r => r.data),
-  resetTotp: (password: string) => api.post('/auth/reset-totp', { password }).then(r => r.data),
   disableTotp: (password: string) => api.post('/auth/disable-totp', { password }).then(r => r.data),
 }
 

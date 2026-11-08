@@ -2,7 +2,7 @@
 import {ref, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {notificationsApi, versionApi, passkeyApi, settingsApi } from '../api'
-import { registerPasskey, isWebAuthnSupported } from '../passkey'
+import { registerPasskey, isWebAuthnSupported, passkeyUnavailableReason } from '../passkey'
 import axios from 'axios'
 import { generateQrDataUrl } from '../qr'
 import { formatTime } from '../time'
@@ -246,7 +246,7 @@ function openResetTotp() {
 async function doResetTotpStep1() {
   totpLoading.value = true
   try {
-    const res = await axios.post('/api/auth/reset-totp', { password: totpPassword.value })
+    const res = await axios.post('/api/auth/totp/setup', { password: totpPassword.value })
     if (res.data.ok) {
       totpSecret.value = res.data.totp_secret
       totpUri.value = res.data.totp_uri
@@ -265,9 +265,9 @@ async function doResetTotpStep1() {
 async function doResetTotpStep3() {
   totpLoading.value = true
   try {
-    const res = await axios.post('/api/auth/verify-totp', { code: totpCode.value })
+    const res = await axios.post('/api/auth/totp/confirm', { code: totpCode.value })
     if (res.data.ok) {
-      alert('TOTP 已重新绑定')
+      alert('TOTP 已绑定')
       showTotpModal.value = false
     } else {
       alert(res.data.error)
@@ -279,8 +279,15 @@ async function doResetTotpStep3() {
   }
 }
 
+function onTotpCodeInput(e: Event) {
+  const el = e.target as HTMLInputElement
+  const digits = el.value.replace(/\D/g, '').slice(0, 6)
+  totpCode.value = digits
+  el.value = digits
+}
+
 async function doDisableTotp() {
-  if (!confirm('确定禁用 TOTP？禁用后登录将不再需要二次验证。')) return
+  if (!confirm('确定禁用 TOTP？禁用后只能使用 Passkey 登录。')) return
   totpLoading.value = true
   try {
     const res = await axios.post('/api/auth/disable-totp', { password: totpPassword.value })
@@ -347,7 +354,7 @@ async function registerPasskeyAction() {
 }
 
 async function deletePasskey() {
-  if (!confirm('确定删除 Passkey？删除后将无法使用 Passkey 登录。')) return
+  if (!confirm('确定删除 Passkey？删除后只能使用用户名 + 密码 + TOTP 登录。')) return
   passkeyLoading.value = true
   try {
     const res = await passkeyApi.delete()
@@ -419,7 +426,7 @@ async function deletePasskey() {
           </div>
           <div>
             <div class="settings-item-title">Passkey</div>
-            <div class="settings-item-desc">浏览器不支持 WebAuthn</div>
+            <div class="settings-item-desc">{{ passkeyUnavailableReason() }}</div>
           </div>
         </div>
 
@@ -654,7 +661,7 @@ async function deletePasskey() {
             <div style="display: flex; gap: 12px; justify-content: flex-end;">
               <button class="btn btn-danger" @click="doDisableTotp" :disabled="totpLoading">禁用 TOTP</button>
               <button class="btn btn-primary" @click="doResetTotpStep1" :disabled="totpLoading">
-                {{ totpLoading ? '验证中...' : '重新绑定' }}
+                {{ totpLoading ? '验证中...' : '绑定新的验证器' }}
               </button>
             </div>
           </template>
@@ -678,8 +685,11 @@ async function deletePasskey() {
           <template v-if="totpStep === 3">
             <p style="font-size: 14px; color: var(--text-secondary); margin-bottom: 16px;">请输入验证器中显示的6位验证码</p>
             <div class="form-group">
-              <input class="form-input" v-model="totpCode" placeholder="000000" maxlength="6"
+              <label class="form-label" for="settings-totp-code">验证码</label>
+              <input id="settings-totp-code" class="form-input" :value="totpCode" placeholder="000000"
+                inputmode="numeric" autocomplete="one-time-code"
                 style="text-align: center; font-size: 24px; letter-spacing: 8px; font-family: monospace;"
+                @input="onTotpCodeInput"
                 @keyup.enter="doResetTotpStep3" />
             </div>
             <button class="btn btn-primary" style="width: 100%;" @click="doResetTotpStep3" :disabled="totpLoading">

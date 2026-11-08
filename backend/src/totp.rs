@@ -34,3 +34,25 @@ pub fn verify_code(secret: &str, code: &str) -> bool {
         .unwrap_or(0);
     totp.check(code, timestamp)
 }
+
+/// 当前时间窗口的验证码，算法与 verify_code 相同。
+#[cfg(test)]
+pub fn current_code(secret: &str) -> String {
+    let secret_bytes = base32::decode(base32::Alphabet::RFC4648 { padding: false }, secret)
+        .expect("totp secret");
+    let totp = TOTP::new(
+        Algorithm::SHA1,
+        6,
+        1,
+        30,
+        secret_bytes,
+        Some(ISSUER.to_string()),
+        "user".to_string(),
+    )
+    .expect("totp");
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    totp.generate(timestamp)
+}

@@ -19,13 +19,12 @@ pub async fn is_initialized(pool: &SqlitePool) -> bool {
     count > 0
 }
 
-/// Setup：创建管理员（首次运行）
+/// Setup：创建管理员（首次运行）。不写入 TOTP，会话需再绑定二次验证。
 pub async fn setup_admin(
     pool: &SqlitePool,
     username: &str,
     password: &str,
-    totp_enabled: bool,
-) -> anyhow::Result<(i64, Option<String>)> {
+) -> anyhow::Result<i64> {
     if is_initialized(pool).await {
         return Err(anyhow::anyhow!("管理员已存在"));
     }
@@ -38,23 +37,105 @@ pub async fn setup_admin(
     }
 
     let hash = crate::crypto::hash_password(password);
-    let totp_secret = if totp_enabled {
-        Some(crate::totp::generate_secret())
-    } else {
-        None
-    };
 
     let id = sqlx::query(
-        "INSERT INTO users (username, password_hash, totp_secret, role) VALUES (?, ?, ?, 'admin')"
+        "INSERT INTO users (username, password_hash, role) VALUES (?, ?, 'admin')"
     )
     .bind(username)
     .bind(&hash)
-    .bind(&totp_secret)
     .execute(pool)
     .await?
     .last_insert_rowid();
 
-    Ok((id, totp_secret))
+    Ok(id)
+}
+
+/// 账户已绑定的登录因子。空的 totp_secret 不算；Passkey 必须可验证。
+pub struct Factors {
+    pub totp: bool,
+    pub passkey: bool,
+}
+
+pub async fn user_factors(pool: &SqlitePool, user_id: i64) -> anyhow::Result<Factors> {
+    let (totp_secret, passkey): (Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT totp_secret, passkey_credential FROM users WHERE id = ?"
+    )
+    .bind(user_id)
+    .fetch_one(pool)
+    .await?;
+    let totp = totp_secret.as_deref().is_some_and(|s| !s.trim().is_empty());
+    let passkey = passkey.as_deref().is_some_and(crate::passkey::has_usable_credential);
+    Ok(Factors { totp, passkey })
+}
+
+/// 绑定 TOTP / Passkey 时的会话上下文。passkey_json 是读到的原始列值。
+pub struct EnrollCtx {
+    pub user_id: i64,
+    pub session_verified: bool,
+    pub passkey_json: Option<String>,
+}
+
+pub async fn enrollment_ctx(pool: &SqlitePool, token: Option<&str>) -> Result<EnrollCtx, &'static str> {
+    let Some(token) = token.filter(|t| !t.is_empty()) else {
+        return Err("未登录");
+    };
+    let row: Option<(i64, i64)> = sqlx::query_as(
+        "SELECT user_id, mfa_verified FROM sessions WHERE token = ? AND expires_at > datetime('now')"
+    )
+    .bind(token)
+    .fetch_optional(pool)
+    .await
+    .map_err(|_| "未登录")?;
+    let Some((user_id, mfa)) = row else {
+        return Err("未登录");
+    };
+    let passkey_json: Option<String> = sqlx::query_scalar(
+        "SELECT passkey_credential FROM users WHERE id = ?"
+    )
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|_| "未登录")?
+    .flatten();
+    let session_verified = mfa != 0;
+    if session_verified {
+        return Ok(EnrollCtx { user_id, session_verified, passkey_json });
+    }
+    let factors = user_factors(pool, user_id).await.map_err(|_| "未登录")?;
+    if factors.totp || factors.passkey {
+        return Err("请先完成二次验证");
+    }
+    Ok(EnrollCtx { user_id, session_verified, passkey_json })
+}
+
+pub async fn mark_session_verified(pool: &SqlitePool, token: &str) -> anyhow::Result<()> {
+    sqlx::query("UPDATE sessions SET mfa_verified = 1 WHERE token = ?")
+        .bind(token)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// 把待确认的 TOTP 提升为正式密钥。条件不满足时不写，返回 false。
+pub(crate) async fn promote_pending_totp(
+    pool: &SqlitePool,
+    user_id: i64,
+    session_verified: bool,
+    pending: &str,
+    passkey_json_seen: Option<&str>,
+) -> anyhow::Result<bool> {
+    let verified: i64 = if session_verified { 1 } else { 0 };
+    let res = sqlx::query(
+        "UPDATE users SET totp_secret = totp_pending_secret, totp_pending_secret = NULL \
+         WHERE id = ? AND totp_pending_secret = ? AND (? = 1 OR (TRIM(COALESCE(totp_secret,'')) = '' AND passkey_credential IS ?))"
+    )
+    .bind(user_id)
+    .bind(pending)
+    .bind(verified)
+    .bind(passkey_json_seen)
+    .execute(pool)
+    .await?;
+    Ok(res.rows_affected() == 1)
 }
 
 /// 获取客户端 IP
@@ -116,7 +197,11 @@ pub async fn auth_middleware(
         | "/auth/setup"
         | "/auth/verify-totp"
         | "/auth/logout"
+        | "/auth/totp/setup"
+        | "/auth/totp/confirm"
         | "/passkey/has"
+        | "/passkey/register/start"
+        | "/passkey/register/finish"
         | "/version"  // 只放行 GET /version，不放行 /version/check, /version/update
     ) || path.starts_with("/passkey/login/"); // passkey login 有子路径
 
@@ -182,17 +267,23 @@ pub async fn cleanup_sessions(pool: &SqlitePool) {
         .await;
 }
 
+/// 密码登录的结果。两种都是未完成二次验证的会话；仅有 Passkey 时不发会话。
+pub enum LoginOutcome {
+    NeedsTotp(String),
+    NeedsEnrollment(String),
+}
+
 /// 登录（统一错误消息，不泄露用户是否存在）
-pub async fn login(pool: &SqlitePool, username: &str, password: &str, ip: Option<&str>) -> anyhow::Result<(String, bool, Option<String>)> {
-    let user = sqlx::query_as::<_, (i64, String, String, Option<String>, Option<String>)>(
-        "SELECT id, username, password_hash, totp_secret, passkey_credential FROM users WHERE username = ?"
+pub async fn login(pool: &SqlitePool, username: &str, password: &str, ip: Option<&str>) -> anyhow::Result<LoginOutcome> {
+    let user = sqlx::query_as::<_, (i64, String)>(
+        "SELECT id, password_hash FROM users WHERE username = ?"
     )
     .bind(username)
     .fetch_optional(pool)
     .await?;
 
     // 统一错误消息：不区分"用户不存在"和"密码错误"
-    let (user_id, _, hash, totp_secret, passkey_cred) = match user {
+    let (user_id, hash) = match user {
         Some(u) => u,
         None => return Err(anyhow::anyhow!("用户名或密码错误")),
     };
@@ -201,14 +292,17 @@ pub async fn login(pool: &SqlitePool, username: &str, password: &str, ip: Option
         return Err(anyhow::anyhow!("用户名或密码错误"));
     }
 
-    let has_totp = totp_secret.is_some();
-    let has_passkey = passkey_cred.is_some();
-    let needs_mfa = has_totp || has_passkey;
-
-    let mfa_verified = !needs_mfa;
-    let token = create_session(pool, user_id, mfa_verified, ip).await?;
-
-    Ok((token, needs_mfa, totp_secret))
+    let factors = user_factors(pool, user_id).await?;
+    if factors.totp {
+        let token = create_session(pool, user_id, false, ip).await?;
+        return Ok(LoginOutcome::NeedsTotp(token));
+    }
+    if factors.passkey {
+        // 只有 Passkey 时，密码不能换到任何会话
+        return Err(anyhow::anyhow!("用户名或密码错误"));
+    }
+    let token = create_session(pool, user_id, false, ip).await?;
+    Ok(LoginOutcome::NeedsEnrollment(token))
 }
 
 /// 验证 TOTP（带限流）

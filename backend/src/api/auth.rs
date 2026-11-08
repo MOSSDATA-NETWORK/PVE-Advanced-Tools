@@ -42,7 +42,6 @@ pub struct LoginRequest {
 pub struct SetupRequest {
     pub username: String,
     pub password: String,
-    pub enable_totp: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -85,20 +84,17 @@ pub async fn setup(
     // 保留限流（复用登录限流器）防爆破。
     let client_ip = extract_ip(&headers, &addr);
 
-    match crate::auth::setup_admin(&state.db, &body.username, &body.password, body.enable_totp.unwrap_or(false)).await {
-        Ok((user_id, totp_secret)) => {
-            match crate::auth::create_session(&state.db, user_id, true, client_ip.as_deref()).await {
+    match crate::auth::setup_admin(&state.db, &body.username, &body.password).await {
+        Ok(user_id) => {
+            match crate::auth::create_session(&state.db, user_id, false, client_ip.as_deref()).await {
                 Ok(token) => {
                     let cookie = crate::auth::build_session_cookie(&token, state.tls_enabled);
                     let jar = jar.add(cookie);
-
-                    let mut resp = json!({"ok": true, "message": "设置完成"});
-                    if let Some(secret) = totp_secret {
-                        let uri = crate::totp::get_otpauth_uri(&body.username, &secret);
-                        resp["totp_secret"] = json!(secret);
-                        resp["totp_uri"] = json!(uri);
-                    }
-                    (jar, Json(resp))
+                    (jar, Json(json!({
+                        "ok": true,
+                        "needs_enrollment": true,
+                        "message": "账户已创建，请绑定二次验证"
+                    })))
                 }
                 Err(e) => (jar, Json(json!({"ok": false, "error": e.to_string()}))),
             }
@@ -128,21 +124,32 @@ pub async fn login(
     }
 
     match crate::auth::login(&state.db, &body.username, &body.password, client_ip.as_deref()).await {
-        Ok((token, needs_mfa, _totp_secret)) => {
+        Ok(outcome) => {
             // 登录成功，清除限制
             state.login_limiter.clear(&rate_key).await;
-
-            let cookie = crate::auth::build_session_cookie(&token, state.tls_enabled);
+            let token = match &outcome {
+                crate::auth::LoginOutcome::NeedsTotp(t) | crate::auth::LoginOutcome::NeedsEnrollment(t) => t,
+            };
+            let cookie = crate::auth::build_session_cookie(token, state.tls_enabled);
             let jar = jar.add(cookie);
-
-            if needs_mfa {
-                (jar, Json(json!({"ok": true, "needs_mfa": true, "message": "需要二次验证"})))
-            } else {
-                (jar, Json(json!({"ok": true, "needs_mfa": false, "message": "登录成功"})))
-            }
+            let body = match outcome {
+                crate::auth::LoginOutcome::NeedsTotp(_) => json!({
+                    "ok": true,
+                    "needs_mfa": true,
+                    "needs_enrollment": false,
+                    "message": "需要二次验证"
+                }),
+                crate::auth::LoginOutcome::NeedsEnrollment(_) => json!({
+                    "ok": true,
+                    "needs_mfa": false,
+                    "needs_enrollment": true,
+                    "message": "请先绑定二次验证"
+                }),
+            };
+            (jar, Json(body))
         }
         Err(e) => {
-            // 登录失败，记录
+            // 登录失败，记录（含仅 Passkey 账户的密码尝试）
             state.login_limiter.record_failure(&rate_key).await;
             (jar, Json(json!({"ok": false, "error": e.to_string()})))
         }
@@ -211,67 +218,110 @@ pub async fn change_password(
     }
 }
 
-/// 重置 TOTP
-pub async fn reset_totp(
+fn session_token(jar: &CookieJar) -> Option<String> {
+    jar.get("session").map(|c| c.value().to_string())
+}
+
+/// 生成待确认的 TOTP 密钥。不改已生效的 totp_secret。
+pub async fn totp_setup(
     State(state): State<Arc<AppState>>,
     jar: CookieJar,
     Json(body): Json<PasswordRequest>,
 ) -> Json<Value> {
-    let token = match jar.get("session") {
-        Some(c) => c.value().to_string(),
-        None => return Json(json!({"ok": false, "error": "未登录"})),
+    let Some(token) = session_token(&jar) else {
+        return Json(json!({"ok": false, "error": "未登录"}));
+    };
+    let ctx = match crate::auth::enrollment_ctx(&state.db, Some(&token)).await {
+        Ok(c) => c,
+        Err(e) => return Json(json!({"ok": false, "error": e})),
     };
 
-    let user_id: Option<i64> = sqlx::query_scalar(
-        "SELECT user_id FROM sessions WHERE token = ? AND expires_at > datetime('now')"
+    let row: Option<(String, String)> = sqlx::query_as(
+        "SELECT password_hash, username FROM users WHERE id = ?"
     )
-    .bind(&token)
+    .bind(ctx.user_id)
     .fetch_optional(&state.db)
     .await
     .unwrap_or(None);
-
-    let user_id = match user_id {
-        Some(id) => id,
-        None => return Json(json!({"ok": false, "error": "会话无效"})),
+    let Some((hash, username)) = row else {
+        return Json(json!({"ok": false, "error": "用户不存在"}));
     };
-
-    let password_hash: Option<String> = sqlx::query_scalar("SELECT password_hash FROM users WHERE id = ?")
-        .bind(user_id)
-        .fetch_optional(&state.db)
-        .await
-        .unwrap_or(None);
-
-    match password_hash {
-        Some(hash) => {
-            if !crate::crypto::verify_password(&body.password, &hash) {
-                return Json(json!({"ok": false, "error": "密码错误"}));
-            }
-        }
-        None => return Json(json!({"ok": false, "error": "用户不存在"})),
+    if !crate::crypto::verify_password(&body.password, &hash) {
+        return Json(json!({"ok": false, "error": "密码错误"}));
     }
 
     let secret = crate::totp::generate_secret();
-    let username: String = sqlx::query_scalar("SELECT username FROM users WHERE id = ?")
-        .bind(user_id)
-        .fetch_one(&state.db)
-        .await
-        .unwrap_or_default();
-
-    sqlx::query("UPDATE users SET totp_secret = ? WHERE id = ?")
+    if let Err(e) = sqlx::query("UPDATE users SET totp_pending_secret = ? WHERE id = ?")
         .bind(&secret)
-        .bind(user_id)
+        .bind(ctx.user_id)
         .execute(&state.db)
         .await
-        .ok();
-
+    {
+        return Json(json!({"ok": false, "error": e.to_string()}));
+    }
     let uri = crate::totp::get_otpauth_uri(&username, &secret);
-
     Json(json!({
         "ok": true,
         "totp_secret": secret,
         "totp_uri": uri,
         "message": "请扫描二维码并输入验证码完成绑定"
     }))
+}
+
+/// 确认待绑定的 TOTP，成功后把当前会话标为已验证。
+pub async fn totp_confirm(
+    State(state): State<Arc<AppState>>,
+    jar: CookieJar,
+    Json(body): Json<TotpVerifyRequest>,
+) -> Json<Value> {
+    let Some(token) = session_token(&jar) else {
+        return Json(json!({"ok": false, "error": "未登录"}));
+    };
+    let ctx = match crate::auth::enrollment_ctx(&state.db, Some(&token)).await {
+        Ok(c) => c,
+        Err(e) => return Json(json!({"ok": false, "error": e})),
+    };
+
+    let rate_key = format!("totp-confirm:{token}");
+    if !state.login_limiter.check(&rate_key).await {
+        let n = state.login_limiter.remaining_secs(&rate_key).await;
+        return Json(json!({"ok": false, "error": format!("验证尝试次数过多，请 {n} 秒后重试")}));
+    }
+
+    let pending: Option<String> = sqlx::query_scalar(
+        "SELECT totp_pending_secret FROM users WHERE id = ?"
+    )
+    .bind(ctx.user_id)
+    .fetch_optional(&state.db)
+    .await
+    .ok()
+    .flatten()
+    .flatten();
+    let Some(pending) = pending.filter(|s| !s.trim().is_empty()) else {
+        return Json(json!({"ok": false, "error": "请先获取新的 TOTP 密钥"}));
+    };
+    if !crate::totp::verify_code(&pending, &body.code) {
+        state.login_limiter.record_failure(&rate_key).await;
+        return Json(json!({"ok": false, "error": "验证码错误"}));
+    }
+
+    match crate::auth::promote_pending_totp(
+        &state.db,
+        ctx.user_id,
+        ctx.session_verified,
+        &pending,
+        ctx.passkey_json.as_deref(),
+    ).await {
+        Ok(true) => {
+            state.login_limiter.clear(&rate_key).await;
+            if let Err(e) = crate::auth::mark_session_verified(&state.db, &token).await {
+                return Json(json!({"ok": false, "error": e.to_string()}));
+            }
+            Json(json!({"ok": true, "message": "TOTP 已绑定"}))
+        }
+        Ok(false) => Json(json!({"ok": false, "error": "账户状态已变化，请刷新后重试"})),
+        Err(e) => Json(json!({"ok": false, "error": e.to_string()})),
+    }
 }
 
 /// 禁用 TOTP
@@ -313,11 +363,29 @@ pub async fn disable_totp(
         None => return Json(json!({"ok": false, "error": "用户不存在"})),
     }
 
-    sqlx::query("UPDATE users SET totp_secret = NULL WHERE id = ?")
-        .bind(user_id)
-        .execute(&state.db)
-        .await
-        .ok();
+    let passkey_json: Option<String> = sqlx::query_scalar(
+        "SELECT passkey_credential FROM users WHERE id = ?"
+    )
+    .bind(user_id)
+    .fetch_optional(&state.db)
+    .await
+    .ok()
+    .flatten()
+    .flatten();
+    if !passkey_json.as_deref().is_some_and(crate::passkey::has_usable_credential) {
+        return Json(json!({"ok": false, "error": "TOTP 是当前唯一的登录验证方式，请先注册 Passkey 再禁用"}));
+    }
 
-    Json(json!({"ok": true, "message": "TOTP 已禁用"}))
+    let updated = sqlx::query(
+        "UPDATE users SET totp_secret = NULL, totp_pending_secret = NULL WHERE id = ? AND passkey_credential IS ?"
+    )
+    .bind(user_id)
+    .bind(passkey_json.as_deref())
+    .execute(&state.db)
+    .await;
+    match updated {
+        Ok(r) if r.rows_affected() == 1 => Json(json!({"ok": true, "message": "TOTP 已禁用"})),
+        Ok(_) => Json(json!({"ok": false, "error": "账户状态已变化，请刷新后重试"})),
+        Err(e) => Json(json!({"ok": false, "error": e.to_string()})),
+    }
 }

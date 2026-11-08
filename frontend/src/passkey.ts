@@ -46,8 +46,7 @@ export async function registerPasskey(options: {
       },
       challenge: challengeBuffer,
       pubKeyCredParams: [
-        { type: 'public-key', alg: -7 },   // ES256 (P-256)
-        { type: 'public-key', alg: -257 }, // RS256
+        { type: 'public-key', alg: -7 },
       ],
       timeout: 60000,
       attestation: 'none',
@@ -94,7 +93,7 @@ export async function authenticateWithPasskey(options: {
       rpId: options.rpId,
       challenge: challengeBuffer,
       timeout: 60000,
-      userVerification: 'preferred',
+      userVerification: 'required',
       allowCredentials: (options.allowCredentials || []).map(id => ({
         id: base64urlToBuffer(id),
         type: 'public-key' as PublicKeyCredentialType,
@@ -118,6 +117,7 @@ export async function authenticateWithPasskey(options: {
       authenticatorData: bufferToBase64url(response.authenticatorData),
       clientDataJSON: bufferToBase64url(response.clientDataJSON),
       signature: bufferToBase64url(response.signature),
+      userHandle: response.userHandle ? bufferToBase64url(response.userHandle) : null,
     },
   }
 }
@@ -125,6 +125,17 @@ export async function authenticateWithPasskey(options: {
 /// 检查浏览器是否支持 WebAuthn
 export function isWebAuthnSupported(): boolean {
   return !!(window.PublicKeyCredential && navigator.credentials)
+}
+
+/// 当前环境不能使用 Passkey 时返回原因，可用时返回空字符串
+export function passkeyUnavailableReason(): string {
+  if (!window.isSecureContext) {
+    return 'Passkey 需要通过 HTTPS 域名访问面板（本机可用 http://localhost）'
+  }
+  if (!isWebAuthnSupported()) {
+    return '当前浏览器不支持 Passkey'
+  }
+  return ''
 }
 
 /// 检查是否支持平台认证器（指纹/面容）

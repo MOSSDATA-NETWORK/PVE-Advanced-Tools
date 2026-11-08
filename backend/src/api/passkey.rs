@@ -1,5 +1,5 @@
 /// Passkey API 端点
-use axum::{extract::State, Json};
+use axum::{extract::State, http::HeaderMap, Json};
 use axum_extra::extract::CookieJar;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -17,18 +17,30 @@ pub struct PasskeyLoginFinishRequest {
     pub credential: serde_json::Value,
 }
 
-/// Passkey 注册：生成挑战
+fn session_token(jar: &CookieJar) -> Option<String> {
+    jar.get("session").map(|c| c.value().to_string())
+}
+
+/// Passkey 注册：生成挑战。公开路由，由 enrollment_ctx 限制会话。
 pub async fn register_start(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     jar: CookieJar,
 ) -> Json<Value> {
-    let user_id = match get_user_id(&state, &jar).await {
-        Some(id) => id,
-        None => return Json(json!({"ok": false, "error": "未登录"})),
+    let Some(token) = session_token(&jar) else {
+        return Json(json!({"ok": false, "error": "未登录"}));
+    };
+    let ctx = match crate::auth::enrollment_ctx(&state.db, Some(&token)).await {
+        Ok(c) => c,
+        Err(e) => return Json(json!({"ok": false, "error": e})),
+    };
+    let rp = match crate::passkey::resolve_rp(&headers) {
+        Ok(rp) => rp,
+        Err(e) => return Json(json!({"ok": false, "error": e})),
     };
 
     let username: String = sqlx::query_scalar("SELECT username FROM users WHERE id = ?")
-        .bind(user_id)
+        .bind(ctx.user_id)
         .fetch_one(&state.db)
         .await
         .unwrap_or_default();
@@ -50,11 +62,11 @@ pub async fn register_start(
         "ok": true,
         "challenge": challenge,
         "rp": {
-            "id": crate::passkey::get_rp_id(),
+            "id": rp.id,
             "name": crate::passkey::RP_NAME,
         },
         "user": {
-            "id": user_id.to_string(),
+            "id": ctx.user_id.to_string(),
             "name": username,
             "displayName": username,
         },
@@ -65,12 +77,20 @@ pub async fn register_start(
 /// Passkey 注册：验证并存储
 pub async fn register_finish(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     jar: CookieJar,
     Json(resp): Json<serde_json::Value>,
 ) -> Json<Value> {
-    let user_id = match get_user_id(&state, &jar).await {
-        Some(id) => id,
-        None => return Json(json!({"ok": false, "error": "未登录"})),
+    let Some(token) = session_token(&jar) else {
+        return Json(json!({"ok": false, "error": "未登录"}));
+    };
+    let ctx = match crate::auth::enrollment_ctx(&state.db, Some(&token)).await {
+        Ok(c) => c,
+        Err(e) => return Json(json!({"ok": false, "error": e})),
+    };
+    let rp = match crate::passkey::resolve_rp(&headers) {
+        Ok(rp) => rp,
+        Err(e) => return Json(json!({"ok": false, "error": e})),
     };
 
     // 获取存储的 challenge（检查过期）
@@ -92,13 +112,22 @@ pub async fn register_finish(
         Err(e) => return Json(json!({"ok": false, "error": format!("响应格式错误: {}", e)})),
     };
 
-    match crate::passkey::verify_and_store_credential(&state.db, user_id, &reg_resp, &challenge).await {
+    match crate::passkey::verify_and_store_credential(
+        &state.db,
+        ctx.user_id,
+        &reg_resp,
+        &challenge,
+        &rp,
+        ctx.session_verified,
+    ).await {
         Ok(_) => {
-            // 清除 challenge
             sqlx::query("DELETE FROM settings WHERE key = 'passkey_reg_challenge'")
                 .execute(&state.db)
                 .await
                 .ok();
+            if let Err(e) = crate::auth::mark_session_verified(&state.db, &token).await {
+                return Json(json!({"ok": false, "error": e.to_string()}));
+            }
             Json(json!({"ok": true, "message": "Passkey 注册成功"}))
         }
         Err(e) => Json(json!({"ok": false, "error": e.to_string()})),
@@ -110,8 +139,14 @@ pub async fn register_finish(
 /// 无用户名 → discoverable credentials（浏览器自己选）
 pub async fn login_start(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(body): Json<PasskeyLoginStartRequest>,
 ) -> Json<Value> {
+    let rp = match crate::passkey::resolve_rp(&headers) {
+        Ok(rp) => rp,
+        Err(e) => return Json(json!({"ok": false, "error": e})),
+    };
+
     let challenge = crate::passkey::generate_challenge();
 
     // 存储 challenge（带时间戳）
@@ -124,15 +159,15 @@ pub async fn login_start(
 
     match body.username {
         Some(username) => {
-            // 有用户名 → 指定凭据
-            let allow_creds = crate::passkey::get_user_credential_ids(&state.db, &username).await;
+            // 有用户名 → 只列出当前可用的凭据
+            let allow_creds = crate::passkey::get_usable_credential_ids(&state.db, &username).await;
             if allow_creds.is_empty() {
                 return Json(json!({"ok": false, "error": "该用户未注册 Passkey"}));
             }
             Json(json!({
                 "ok": true,
                 "challenge": challenge,
-                "rpId": crate::passkey::get_rp_id(),
+                "rpId": rp.id,
                 "allowCredentials": allow_creds,
             }))
         }
@@ -141,7 +176,7 @@ pub async fn login_start(
             Json(json!({
                 "ok": true,
                 "challenge": challenge,
-                "rpId": crate::passkey::get_rp_id(),
+                "rpId": rp.id,
                 "allowCredentials": [],
             }))
         }
@@ -151,7 +186,7 @@ pub async fn login_start(
 /// Passkey 登录：验证签名
 pub async fn login_finish(
     State(state): State<Arc<AppState>>,
-    headers: axum::http::HeaderMap,
+    headers: HeaderMap,
     Json(body): Json<PasskeyLoginFinishRequest>,
 ) -> (CookieJar, Json<Value>) {
     let jar = CookieJar::new();
@@ -205,7 +240,7 @@ pub async fn login_finish(
     }
 }
 
-/// 删除 Passkey 凭据
+/// 删除 Passkey 凭据。仍绑定 TOTP 时才允许，避免账户失去全部登录因子。
 pub async fn delete(
     State(state): State<Arc<AppState>>,
     jar: CookieJar,
@@ -215,20 +250,27 @@ pub async fn delete(
         None => return Json(json!({"ok": false, "error": "未登录"})),
     };
 
-    match crate::passkey::delete_credentials(&state.db, user_id).await {
-        Ok(_) => Json(json!({"ok": true, "message": "Passkey 已删除"})),
+    match sqlx::query(
+        "UPDATE users SET passkey_credential = NULL WHERE id = ? AND TRIM(COALESCE(totp_secret,'')) <> ''"
+    )
+    .bind(user_id)
+    .execute(&state.db)
+    .await
+    {
+        Ok(r) if r.rows_affected() == 1 => Json(json!({"ok": true, "message": "Passkey 已删除"})),
+        Ok(_) => Json(json!({"ok": false, "error": "Passkey 是当前唯一的登录验证方式，请先绑定 TOTP 再删除"})),
         Err(e) => Json(json!({"ok": false, "error": e.to_string()})),
     }
 }
 
-/// 检查用户是否有 Passkey（可选用户名，不传则检查是否有任何用户注册了 Passkey）
+/// 检查用户是否有可用 Passkey（可选用户名，不传则检查是否有任何用户注册了可用 Passkey）
 pub async fn has_passkey(
     State(state): State<Arc<AppState>>,
     Json(body): Json<PasskeyLoginStartRequest>,
 ) -> Json<Value> {
     match body.username {
         Some(username) => {
-            let cred_ids = crate::passkey::get_user_credential_ids(&state.db, &username).await;
+            let cred_ids = crate::passkey::get_usable_credential_ids(&state.db, &username).await;
             Json(json!({
                 "ok": true,
                 "has_passkey": !cred_ids.is_empty(),
@@ -236,13 +278,13 @@ pub async fn has_passkey(
             }))
         }
         None => {
-            // 检查是否有任何用户注册了 Passkey
-            let count: i64 = sqlx::query_scalar(
-                "SELECT COUNT(*) FROM users WHERE passkey_credential IS NOT NULL"
+            let rows: Vec<String> = sqlx::query_scalar(
+                "SELECT passkey_credential FROM users WHERE passkey_credential IS NOT NULL"
             )
-            .fetch_one(&state.db)
+            .fetch_all(&state.db)
             .await
-            .unwrap_or(0);
+            .unwrap_or_default();
+            let count = rows.iter().filter(|j| crate::passkey::has_usable_credential(j)).count();
             Json(json!({
                 "ok": true,
                 "has_passkey": count > 0,

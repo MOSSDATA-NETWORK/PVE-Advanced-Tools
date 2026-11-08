@@ -19,6 +19,9 @@ mod totp;
 mod version;
 mod vms;
 
+#[cfg(test)]
+mod mfa_tests;
+
 use axum::Router;
 use sqlx::sqlite::SqlitePoolOptions;
 use std::sync::Arc;
@@ -43,13 +46,14 @@ async fn run_migrations(pool: &sqlx::SqlitePool) -> anyhow::Result<()> {
         .execute(pool)
         .await?;
 
-    let migrations: [(&str, &str); 6] = [
+    let migrations: [(&str, &str); 7] = [
         ("001_init", include_str!("../migrations/001_init.sql")),
         ("002_p0", include_str!("../migrations/002_p0.sql")),
         ("003_p1", include_str!("../migrations/003_p1.sql")),
         ("004_p4", include_str!("../migrations/004_p4.sql")),
         ("005_p3", include_str!("../migrations/005_p3.sql")),
         ("006_extras", include_str!("../migrations/006_extras.sql")),
+        ("007_mfa", include_str!("../migrations/007_mfa.sql")),
     ];
 
     for (name, sql) in migrations {
@@ -398,7 +402,7 @@ async fn bootstrap_admin_from_env(pool: &sqlx::SqlitePool) {
         tracing::warn!("INITIAL_ADMIN_* 已设置但管理员已存在，忽略（请从服务配置中移除这两个变量）");
         return;
     }
-    match crate::auth::setup_admin(pool, user.trim(), &pass, false).await {
+    match crate::auth::setup_admin(pool, user.trim(), &pass).await {
         Ok(_) => tracing::info!("已通过环境变量创建管理员「{}」。请立即从服务配置中移除 INITIAL_ADMIN_* 并重启", user.trim()),
         Err(e) => tracing::error!("环境变量创建管理员失败: {}", e),
     }

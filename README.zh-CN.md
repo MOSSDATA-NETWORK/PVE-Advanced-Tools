@@ -34,7 +34,7 @@
 - **巡检告警**：定时巡检（磁盘/内存/负载/VM 数/组件存活），Telegram 与企业微信通知，告警去重
 - **审计日志**：敏感操作全部留痕可查
 - **在线更新**：GitHub Releases 检查、SHA256SUMS + ed25519 签名校验（失败关闭）、原子替换、更新前自动备份 SQLite 与二进制、启动自检与 `.bak` 回滚
-- **认证**：密码 + TOTP 两步验证 + passkey，登录限流，初始化仅限本机直连
+- **认证**：密码 + TOTP，或单独使用 Passkey；初始化时必须绑定其中一种；登录限流；首次管理员通过网页初始化（首个管理员创建前对外开放）或 `INITIAL_ADMIN_*` 环境变量引导
 
 ## 环境要求
 
@@ -80,14 +80,14 @@ sudo bash deploy/install.sh [端口]   # 默认 3210
 
 **创建管理员**（三种方式任选）：
 
-1. **网页初始化**：直接访问 `http://<服务器或域名>:3210` 按引导创建（页面对外开放，仅首次有效；
-   请在部署后尽快完成初始化——初始化前的窗口期内任何访问者都可创建管理员，被抢先请重装或清空数据库重来）。
+1. **网页初始化**：直接访问 `http://<服务器或域名>:3210`，填写用户名和密码，然后必须绑定 TOTP 或 Passkey（二选一）。页面对外开放，仅首次有效；
+   请在部署后尽快完成初始化——初始化前的窗口期内任何访问者都可创建管理员，被抢先请重装或清空数据库重来。
 2. **环境变量引导**：启动前在服务配置中设置 `INITIAL_ADMIN_USERNAME=admin` 与
    `INITIAL_ADMIN_PASSWORD=<强密码>`（install.sh 可写入 `/opt/pve-advanced-tools/env`），
-   首次启动自动建号；**创建成功后请移除这两个变量并重启**。
+   首次启动自动建号；**创建成功后请移除这两个变量并重启**。该账户须在首次登录时绑定 TOTP 或 Passkey。
 3. **SSH 隧道**：`ssh -L 3210:127.0.0.1:3210 root@服务器`，浏览器访问 `http://127.0.0.1:3210`。
 
-初始化完成后，日常访问走域名反代即可，无任何限制。passkey 等全部功能在登录后设置，与初始化方式无关。
+初始化完成后，日常访问走域名反代即可，无任何限制。TOTP 或 Passkey 在初始化时绑定（二选一），另一种可在登录后于设置中添加作为备用。
 
 ### 配置项（环境变量）
 
@@ -98,12 +98,18 @@ sudo bash deploy/install.sh [端口]   # 默认 3210
 | `DATABASE_URL` | `sqlite:pve-advanced-tools.db?mode=rwc` | SQLite 路径 |
 | `PORT` / `HOST` | `3210` / `0.0.0.0` | 监听地址 |
 | `TLS_CERT` / `TLS_KEY` | — | 直接 TLS；或在 HTTPS 反代后设 `BEHIND_TLS_PROXY=1` |
+| `RP_ORIGIN` | 浏览器使用的地址 | 可选。固定 Passkey 唯一接受的面板地址，例如 `https://pve.example.com` |
+| `RP_ID` | 面板的域名 | 可选。Passkey 域名，须等于面板域名或其父域名，例如 `example.com` |
 | `STATIC_DIR` | `static` | 前端资源目录 |
 | `DATA_DIR` | `data` | 运行时文件（平台维护的 known_hosts） |
 | `UPDATE_SIGN_PUBKEY` | — | 更新验签公钥（ed25519 hex）。配置后发布必须带 `.sig`；未配置时拒绝在线更新（失败关闭） |
 | `UPDATE_GITHUB_REPO` | `MOSSDATA-NETWORK/PVE-Advanced-Tools` | 更新来源仓库 |
 | `platform_public_url`（面板设置） | — | 节点可达的平台地址，下发 vmqos 配置前必须配置 |
 | `github_mirror_token`（面板设置） | — | vmqos 为私有仓库时配置 GitHub token，节点经平台代理下载二进制（加密存储、只显示掩码） |
+
+### Passkey
+
+Passkey 需要通过域名以 HTTPS 打开面板（同一台机器上可用 `http://localhost`）——IP 地址和明文 HTTP 不可用。位于反向代理之后时，浏览器的 `Origin` 头必须原样到达后端（随附的 nginx 配置已满足）。每个 Passkey 绑定注册时的精确地址（协议、域名、端口）——更换该地址后，请用密码 + TOTP 登录并重新注册，因此建议保留 TOTP 作为备用。
 
 ## 快速上手
 
@@ -114,6 +120,8 @@ sudo bash deploy/install.sh [端口]   # 默认 3210
 5. **告警与巡检**：配置 Telegram / 企业微信通知渠道，调整巡检间隔与告警规则
 
 ## 更新与回滚
+
+**升级**：升级到此版本后，所有人会登出一次；没有 TOTP 或 Passkey 的账户须在下次登录时绑定一种。请将前端静态文件与二进制一并更新（应用内更新只替换二进制）。
 
 - **面板**：设置 → 检查更新 → 一键更新（SHA256SUMS + ed25519 签名强制校验）
 - **回滚**：恢复同目录下的 `<二进制>.bak` 与 `<数据库>.bak`（每次更新前自动写入），重启服务即可
