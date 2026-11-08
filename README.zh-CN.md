@@ -33,14 +33,14 @@
 - **VM 稳定标识**：SMBIOS UUID 优先、node+VMID 兜底，自动重绑并留痕
 - **巡检告警**：定时巡检（磁盘/内存/负载/VM 数/组件存活），Telegram 与企业微信通知，告警去重
 - **审计日志**：敏感操作全部留痕可查
-- **在线更新**：GitHub Releases 检查、SHA256SUMS + ed25519 签名校验（失败关闭）、原子替换、更新前自动备份 SQLite 与二进制、启动自检与 `.bak` 回滚
+- **在线更新**：GitHub Releases 检查、SHA256SUMS 校验（失败关闭）、原子替换（网页内置在程序里，随程序一起更新）、更新前自动备份 SQLite 与二进制、启动自检与 `.bak` 回滚
 - **认证**：密码 + TOTP，或单独使用 Passkey；初始化时必须绑定其中一种；登录限流；首次管理员通过网页初始化（首个管理员创建前对外开放）或 `INITIAL_ADMIN_*` 环境变量引导
 
 ## 环境要求
 
 | 组件 | 要求 |
 |---|---|
-| 平台宿主机 | Linux（x86_64/aarch64）或 macOS；约 50 MB 内存 |
+| 平台宿主机 | 预编译二进制：Linux x86_64，glibc 2.36 及以上（Debian 12 及更新版本）；Docker 镜像：任意 x86_64 Docker 主机；其他平台：源码构建。约 50 MB 内存 |
 | 被管节点 | Proxmox VE 7 / 8 / 9，root SSH 可达 |
 | 节点工具 | `curl`、`sha256sum`、`iptables`、`python3`（arpfilter）、`systemd` |
 
@@ -54,13 +54,19 @@
 curl -fSLO https://github.com/MOSSDATA-NETWORK/PVE-Advanced-Tools/releases/latest/download/pve-advanced-tools-linux-x86_64
 curl -fSLO https://github.com/MOSSDATA-NETWORK/PVE-Advanced-Tools/releases/latest/download/SHA256SUMS
 grep pve-advanced-tools-linux-x86_64 SHA256SUMS | sha256sum -c -
-chmod +x pve-advanced-tools-linux-x86_64
+
+# 用本仓库的安装脚本安装为系统服务（见下文）
+git clone https://github.com/MOSSDATA-NETWORK/PVE-Advanced-Tools.git
+install -m 755 pve-advanced-tools-linux-x86_64 PVE-Advanced-Tools/pve-advanced-tools
+sudo bash PVE-Advanced-Tools/deploy/install.sh
 ```
+
+网页与数据库迁移都已内置在程序里，无需另外复制文件。
 
 ### 方式 B —— 源码构建
 
 ```bash
-# 前端（产物内嵌进二进制静态目录）
+# 先构建前端：产物（backend/static）会内置进程序
 cd frontend && npm install && npm run build   # 输出到 backend/static
 
 # 后端
@@ -74,7 +80,7 @@ sudo bash deploy/install.sh [端口]   # 默认 3210
 ```
 
 安装脚本会：
-- 把二进制与前端资源复制到 `/opt/pve-advanced-tools`
+- 把程序复制到 `/opt/pve-advanced-tools`（网页已内置在程序里）
 - **生成并持久化 `MASTER_KEY`** 到 `/opt/pve-advanced-tools/env`（600 权限）——重装时复用
 - 注册并启动 `pve-advanced-tools` systemd 服务
 
@@ -89,6 +95,27 @@ sudo bash deploy/install.sh [端口]   # 默认 3210
 
 初始化完成后，日常访问走域名反代即可，无任何限制。TOTP 或 Passkey 在初始化时绑定（二选一），另一种可在登录后于设置中添加作为备用。
 
+### Docker 部署
+
+镜像作为文件附在每个 Release 上（不提供镜像仓库拉取）：
+
+```bash
+curl -fSLO https://github.com/MOSSDATA-NETWORK/PVE-Advanced-Tools/releases/latest/download/pve-advanced-tools-docker-linux-x86_64.tar.gz
+curl -fSLO https://github.com/MOSSDATA-NETWORK/PVE-Advanced-Tools/releases/latest/download/SHA256SUMS
+grep pve-advanced-tools-docker-linux-x86_64.tar.gz SHA256SUMS | sha256sum -c -
+docker load -i pve-advanced-tools-docker-linux-x86_64.tar.gz   # 得到 pve-advanced-tools:<版本号> 与 :latest
+
+curl -fSLO https://raw.githubusercontent.com/MOSSDATA-NETWORK/PVE-Advanced-Tools/main/deploy/docker/docker-compose.yml
+docker compose up -d
+# 或：docker run -d --name pve-advanced-tools --init --restart unless-stopped \
+#       -p 3210:3210 -v pve-advanced-tools-data:/data pve-advanced-tools:latest
+```
+
+- 数据（数据库、`master.key`、`known_hosts`）保存在数据卷 `pve-advanced-tools-data` 中。首次启动会生成 `MASTER_KEY` 并写入 `/data/master.key`，请连同数据卷一起备份。若数据库还在但 `master.key` 丢失，容器会拒绝启动，而不是生成一把读不了已存凭据的新密钥。
+- 改用宿主机目录保存数据时，先对该目录执行 `chown 10001:10001`（容器以用户 10001 运行）。
+- 经 HTTPS 反向代理访问时，在 compose 文件中设置 `BEHIND_TLS_PROXY=1`（可选 `RP_ORIGIN`），Passkey 才能使用。
+- 管理员的创建方式同上（网页初始化或 `INITIAL_ADMIN_*` 环境变量）。
+
 ### 配置项（环境变量）
 
 | 变量 | 默认值 | 说明 |
@@ -100,9 +127,9 @@ sudo bash deploy/install.sh [端口]   # 默认 3210
 | `TLS_CERT` / `TLS_KEY` | — | 直接 TLS；或在 HTTPS 反代后设 `BEHIND_TLS_PROXY=1` |
 | `RP_ORIGIN` | 浏览器使用的地址 | 可选。固定 Passkey 唯一接受的面板地址，例如 `https://pve.example.com` |
 | `RP_ID` | 面板的域名 | 可选。Passkey 域名，须等于面板域名或其父域名，例如 `example.com` |
-| `STATIC_DIR` | `static` | 前端资源目录 |
+| `STATIC_DIR` | `static` | 网页目录；仅未内置网页的程序会读取（发布版程序已内置） |
 | `DATA_DIR` | `data` | 运行时文件（平台维护的 known_hosts） |
-| `UPDATE_SIGN_PUBKEY` | — | 更新验签公钥（ed25519 hex）。配置后发布必须带 `.sig`；未配置时拒绝在线更新（失败关闭） |
+| `DEPLOY_MODE` | — | Docker 镜像中为 `docker`：此时拒绝在线更新（改为加载新镜像更新） |
 | `UPDATE_GITHUB_REPO` | `MOSSDATA-NETWORK/PVE-Advanced-Tools` | 更新来源仓库 |
 | `platform_public_url`（面板设置） | — | 节点可达的平台地址，下发 vmqos 配置前必须配置 |
 | `github_mirror_token`（面板设置） | — | vmqos 为私有仓库时配置 GitHub token，节点经平台代理下载二进制（加密存储、只显示掩码） |
@@ -121,10 +148,11 @@ Passkey 需要通过域名以 HTTPS 打开面板（同一台机器上可用 `htt
 
 ## 更新与回滚
 
-**升级**：升级到此版本后，所有人会登出一次；没有 TOTP 或 Passkey 的账户须在下次登录时绑定一种。请将前端静态文件与二进制一并更新（应用内更新只替换二进制）。
+**升级**：升级到此版本后，所有人会登出一次；没有 TOTP 或 Passkey 的账户须在下次登录时绑定一种。用第一版 v0.0.1（已被当前 v0.0.1 替换）安装的面板无法自行更新，请按方式 A 重装一次。
 
-- **面板**：设置 → 检查更新 → 一键更新（SHA256SUMS + ed25519 签名强制校验）
-- **回滚**：恢复同目录下的 `<二进制>.bak` 与 `<数据库>.bak`（每次更新前自动写入），重启服务即可
+- **面板**：设置 → 检查更新 → 一键更新。面板从最新的 GitHub Release 下载程序，按该发布的 `SHA256SUMS` 校验后替换（网页随程序一起更新），再重启 systemd 服务。服务器须能访问 `api.github.com` 与 `github.com`。若使用自己的反向代理，请为 `/api/version/update` 留出最长 15 分钟的超时（随附的 nginx 配置已设置）。
+- **Docker**：先备份数据卷，按上文 Docker 步骤加载新镜像，再执行一次 `docker compose up -d`（或删除后重建容器）。Docker 中的面板内更新按钮会拒绝执行。
+- **回滚**：恢复同目录下的 `<二进制>.bak` 与 `<数据库>.bak`（每次更新前自动写入），重启服务即可。Docker：恢复数据卷备份，并运行上一个版本的镜像。
 
 ## 安全说明
 
@@ -132,6 +160,7 @@ Passkey 需要通过域名以 HTTPS 打开面板（同一台机器上可用 `htt
 - 凭据使用 AES-256-GCM 加密；解密失败按失败关闭处理
 - 节点 API token 以哈希（校验）+ AES-GCM 密文（下发）双存储；轮换采用重叠期，新配置确认生效后才撤销旧 token
 - 节点下载 vmqos 先校验发布 SHA256SUMS 再安装
+- 在线更新按发布的 `SHA256SUMS` 校验程序：能发现下载损坏或不完整，但没有单独的签名密钥——能在本 GitHub 仓库发布版本的人都能推送更新，请保管好仓库权限
 
 ## 署名
 

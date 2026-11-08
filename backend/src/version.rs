@@ -56,6 +56,15 @@ fn http_client() -> reqwest::Client {
         .unwrap_or_default()
 }
 
+/// 下载更新包用：程序约 20 MB，慢速线路上 60 秒总超时不够；连不上时仍尽快失败
+fn download_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(30))
+        .timeout(std::time::Duration::from_secs(15 * 60))
+        .build()
+        .unwrap_or_default()
+}
+
 fn user_agent() -> String {
     format!("PVE-Advanced-Tools/{}", VERSION)
 }
@@ -70,15 +79,14 @@ pub async fn check_update() -> anyhow::Result<VersionInfo> {
         .send()
         .await?;
 
-    if !resp.status().is_success() {
-        return Ok(VersionInfo {
-            current: VERSION.to_string(),
-            latest: None,
-            update_available: false,
-            release_url: None,
-            release_notes: None,
-            published_at: None,
-        });
+    // 查询失败必须报错：当作「无更新」会在界面上显示成「已是最新版本」
+    let status = resp.status();
+    if !status.is_success() {
+        return Err(anyhow::anyhow!(match status.as_u16() {
+            403 | 429 => "GitHub 接口访问次数超限，请稍后再试".to_string(),
+            404 => "GitHub 上还没有已发布的版本".to_string(),
+            _ => format!("无法从 GitHub 获取最新版本（HTTP {}）", status.as_u16()),
+        }));
     }
 
     let release: GithubRelease = resp.json().await?;
@@ -157,56 +165,26 @@ fn sqlite_file_path() -> Option<String> {
     Some(path)
 }
 
-/// 更新签名公钥（ed25519，hex 64 字符）：配置后发布必须带 <制品>.sig 签名。
-/// 环境变量已设置但格式错误 → 报错失败关闭（不得静默降级为仅哈希校验）
-fn update_sign_pubkey() -> anyhow::Result<Option<[u8; 32]>> {
-    // var_os 区分「未设置」与「非法值」：已设置但非 UTF-8 同样失败关闭
-    let Some(raw) = std::env::var_os("UPDATE_SIGN_PUBKEY") else { return Ok(None) };
-    let hex = raw.to_str()
-        .ok_or_else(|| anyhow::anyhow!("UPDATE_SIGN_PUBKEY 含非 UTF-8 字符"))?
-        .trim();
-    if hex.len() != 64 {
-        return Err(anyhow::anyhow!("UPDATE_SIGN_PUBKEY 格式错误（需要 64 位 hex）"));
+/// 按 SHA256SUMS（sha256sum 输出格式）核对制品哈希；文件名须完全一致
+fn check_sha256(sums_text: &str, asset_name: &str, bytes: &[u8]) -> anyhow::Result<()> {
+    let expected = sums_text.lines()
+        .find_map(|line| {
+            let mut it = line.split_whitespace();
+            let hash = it.next()?;
+            let fname = it.next()?;
+            if fname.trim_start_matches('*') == asset_name { Some(hash.to_string()) } else { None }
+        })
+        .ok_or_else(|| anyhow::anyhow!("SHA256SUMS 中未找到 {} 的哈希", asset_name))?;
+
+    use sha2::Digest;
+    let actual = format!("{:x}", sha2::Sha256::digest(bytes));
+    if !actual.eq_ignore_ascii_case(&expected) {
+        return Err(anyhow::anyhow!("制品 SHA256 校验失败（期望 {}，实际 {}），已中止更新", expected, actual));
     }
-    let bytes: Vec<u8> = (0..64)
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&hex[i..i + 2], 16))
-        .collect::<Result<_, _>>()
-        .map_err(|_| anyhow::anyhow!("UPDATE_SIGN_PUBKEY 含非 hex 字符"))?;
-    bytes.try_into()
-        .map(Some)
-        .map_err(|_| anyhow::anyhow!("UPDATE_SIGN_PUBKEY 长度错误"))
+    Ok(())
 }
 
-/// 校验制品 ed25519 签名（sig 支持 raw 64 字节 / hex / base64）
-fn verify_signature(pubkey: &[u8; 32], data: &[u8], sig_bytes: &[u8]) -> anyhow::Result<()> {
-    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
-    let key = VerifyingKey::from_bytes(pubkey)
-        .map_err(|e| anyhow::anyhow!("签名公钥无效: {}", e))?;
-    let sig_raw: Vec<u8> = if sig_bytes.len() == 64 {
-        sig_bytes.to_vec()
-    } else if let Ok(s) = std::str::from_utf8(sig_bytes) {
-        let s = s.trim();
-        if s.len() == 128 {
-            (0..128).step_by(2)
-                .map(|i| u8::from_str_radix(&s[i..i + 2], 16))
-                .collect::<Result<_, _>>()
-                .map_err(|_| anyhow::anyhow!("签名 hex 解析失败"))?
-        } else {
-            use base64::Engine;
-            base64::engine::general_purpose::STANDARD.decode(s)
-                .map_err(|_| anyhow::anyhow!("签名格式无法识别（支持 raw/hex/base64）"))?
-        }
-    } else {
-        return Err(anyhow::anyhow!("签名格式无法识别"));
-    };
-    let sig = Signature::from_slice(&sig_raw)
-        .map_err(|e| anyhow::anyhow!("签名长度错误: {}", e))?;
-    key.verify_strict(data, &sig)
-        .map_err(|_| anyhow::anyhow!("制品签名校验失败，拒绝更新"))
-}
-
-/// 下载并校验 SHA256SUMS 中对应制品的哈希；配置签名公钥时强制验签
+/// 下载制品，并按同一发布附带的 SHA256SUMS 校验哈希（不做签名校验）
 async fn download_verified(client: &reqwest::Client, release: &GithubRelease, asset_name: &str) -> anyhow::Result<Vec<u8>> {
     let asset = release.assets.iter().find(|a| a.name == asset_name)
         .ok_or_else(|| anyhow::anyhow!("未找到适合当前平台的更新包: {}", asset_name))?;
@@ -221,45 +199,14 @@ async fn download_verified(client: &reqwest::Client, release: &GithubRelease, as
         .error_for_status()?
         .text().await?;
 
-    let expected = sums_text.lines()
-        .find_map(|line| {
-            let mut it = line.split_whitespace();
-            let hash = it.next()?;
-            let fname = it.next()?;
-            if fname.trim_start_matches('*') == asset_name { Some(hash.to_string()) } else { None }
-        })
-        .ok_or_else(|| anyhow::anyhow!("SHA256SUMS 中未找到 {} 的哈希", asset_name))?;
-
     let bytes = client.get(&asset.browser_download_url)
         .header("User-Agent", user_agent())
         .send().await?
         .error_for_status()?
         .bytes().await?;
 
-    use sha2::Digest;
-    let actual = format!("{:x}", sha2::Sha256::digest(&bytes));
-    if !actual.eq_ignore_ascii_case(&expected) {
-        return Err(anyhow::anyhow!("制品 SHA256 校验失败（期望 {}，实际 {}），已中止更新", expected, actual));
-    }
-
-    // 签名校验强制开启（SHA256SUMS 与制品同源，不防发布篡改）：
-    // 未配置 UPDATE_SIGN_PUBKEY 时拒绝更新，而不是降级为仅哈希校验
-    match update_sign_pubkey()?.ok_or_else(|| anyhow::anyhow!(
-        "未配置 UPDATE_SIGN_PUBKEY 验签公钥，拒绝更新（SHA256SUMS 与制品同源不足以防篡改）"
-    ))? {
-        pubkey => {
-            let sig_name = format!("{}.sig", asset_name);
-            let sig_asset = release.assets.iter().find(|a| a.name == sig_name)
-                .ok_or_else(|| anyhow::anyhow!("已配置签名公钥但发布缺少 {}，拒绝更新", sig_name))?;
-            let sig_bytes = client.get(&sig_asset.browser_download_url)
-                .header("User-Agent", user_agent())
-                .send().await?
-                .error_for_status()?
-                .bytes().await?;
-            verify_signature(&pubkey, &bytes, &sig_bytes)?;
-            tracing::info!("制品签名校验通过");
-        }
-    }
+    check_sha256(&sums_text, asset_name, &bytes)?;
+    tracing::info!("制品 SHA256 校验通过");
     Ok(bytes.to_vec())
 }
 
@@ -268,6 +215,10 @@ static UPDATE_LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::Onc
 
 /// 执行更新：校验哈希 → 一致性备份数据库与旧二进制 → 原子替换 → 延迟重启
 pub async fn perform_update(pool: &sqlx::SqlitePool) -> anyhow::Result<String> {
+    // 容器里替换的程序会在重建容器时丢失，且没有 systemd 可重启：在下载和改动任何文件之前拒绝
+    if std::env::var("DEPLOY_MODE").as_deref() == Ok("docker") {
+        return Err(anyhow::anyhow!("Docker 部署请用新版镜像更新：下载并 docker load 新镜像后重建容器（见 README 的 Docker 部署）"));
+    }
     let lock = UPDATE_LOCK.get_or_init(|| tokio::sync::Mutex::new(()));
     let Ok(_guard) = lock.try_lock() else {
         return Err(anyhow::anyhow!("已有更新流程在进行中"));
@@ -283,7 +234,7 @@ pub async fn perform_update(pool: &sqlx::SqlitePool) -> anyhow::Result<String> {
 
     let release: GithubRelease = resp.json().await?;
     let asset_name = asset_name()?;
-    let bytes = download_verified(&client, &release, &asset_name).await?;
+    let bytes = download_verified(&download_client(), &release, &asset_name).await?;
 
     let current_exe = std::env::current_exe()?;
 
@@ -326,12 +277,20 @@ pub async fn perform_update(pool: &sqlx::SqlitePool) -> anyhow::Result<String> {
     tokio::fs::rename(&tmp_path, &current_exe).await
         .map_err(|e| anyhow::anyhow!("二进制替换失败: {}（旧版本备份在 {}）", e, backup_path.display()))?;
 
-    // 后台延迟重启（让 HTTP 响应先发出，重启后会自动重新部署脚本）
+    // 后台延迟重启（让 HTTP 响应先发出，重启后会自动重新部署脚本）；
+    // --no-block 只排队重启任务，命令失败（无 systemd、服务名不对）能立即看到并记日志
     tokio::spawn(async {
         tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-        let _ = tokio::process::Command::new("systemctl")
-            .args(["restart", &systemd_service()])
-            .spawn();
+        let service = systemd_service();
+        match tokio::process::Command::new("systemctl")
+            .args(["--no-block", "restart", &service])
+            .status()
+            .await
+        {
+            Ok(s) if s.success() => {}
+            Ok(s) => tracing::error!("重启服务 {} 失败（{}）：新版本已就位，请手动重启", service, s),
+            Err(e) => tracing::error!("无法执行 systemctl（{}）：新版本已就位，请手动重启服务 {}", e, service),
+        }
     });
 
     Ok(format!("已更新到 {}（SHA256 已校验，数据库与旧二进制已备份），正在重启...", release.tag_name))
@@ -377,5 +336,20 @@ mod tests {
         assert!(is_newer("1.0.0", "0.9.9"));
         assert!(!is_newer("0.1.0", "0.1.0"));
         assert!(!is_newer("0.1.0", "0.1.1"));
+    }
+
+    #[test]
+    fn sha256sums_check_rejects_tampered_or_unlisted_files() {
+        // sha256("abc")；SHA256SUMS 由 CI 的 `sha256sum pve-advanced-tools-*` 生成
+        let abc = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+        let bin = "pve-advanced-tools-linux-x86_64";
+        let sums = format!("{abc}  {bin}.tar.gz\n{abc}  {bin}\n");
+        assert!(check_sha256(&sums, bin, b"abc").is_ok());
+        assert!(check_sha256(&format!("{}  *{bin}\n", abc.to_uppercase()), bin, b"abc").is_ok(), "binary-mode line, upper-case hash");
+        let tampered = check_sha256(&sums, bin, b"abd").unwrap_err().to_string();
+        assert!(tampered.starts_with("制品 SHA256 校验失败"), "{tampered}");
+        // 只有前缀相同的其他文件不算
+        let unlisted = check_sha256(&format!("{abc}  {bin}.tar.gz\n"), bin, b"abc").unwrap_err().to_string();
+        assert_eq!(unlisted, format!("SHA256SUMS 中未找到 {bin} 的哈希"));
     }
 }

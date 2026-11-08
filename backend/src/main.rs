@@ -18,6 +18,7 @@ mod tasks;
 mod totp;
 mod version;
 mod vms;
+mod web_ui;
 
 #[cfg(test)]
 mod mfa_tests;
@@ -204,6 +205,11 @@ async fn main() -> anyhow::Result<()> {
 
     let static_dir = std::env::var("STATIC_DIR")
         .unwrap_or_else(|_| "static".to_string());
+    if web_ui::FILES.is_empty() {
+        tracing::info!("前端：从 {} 读取页面", static_dir);
+    } else {
+        tracing::info!("前端：使用内置页面（{} 个文件），不读取 STATIC_DIR", web_ui::FILES.len());
+    }
 
     // index.html 不预读：每次请求现读磁盘。构建产物哈希随版本变化，
     // 内存缓存旧版 index 会引用不存在的资产导致白屏（事故教训 2026-10-10）
@@ -294,6 +300,10 @@ async fn main() -> anyhow::Result<()> {
         .fallback_service(tower::service_fn(move |req: axum::http::Request<axum::body::Body>| {
             let static_dir = state.static_dir.clone();
             async move {
+                // 内置页面优先：更新后的二进制不会读到磁盘上旧版本的页面
+                if !web_ui::FILES.is_empty() {
+                    return Ok::<_, std::convert::Infallible>(web_ui::response(web_ui::FILES, req.uri().path()));
+                }
                 // 每次现读（小文件，开销可忽略；正确性优先）
                 let index_html = tokio::fs::read_to_string(format!("{}/index.html", static_dir))
                     .await

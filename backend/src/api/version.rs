@@ -33,8 +33,11 @@ pub async fn update(State(state): State<Arc<AppState>>, jar: CookieJar) -> Json<
     let actor = crate::audit::actor_from_cookie(&state.db, &jar).await;
     crate::audit::log(&state.db, &actor, "system.update", Some("system"), None,
         Some(&format!("from {}", crate::version::VERSION)), None).await;
-    match crate::version::perform_update(&state.db).await {
-        Ok(msg) => Json(json!({"ok": true, "message": msg})),
-        Err(e) => Json(json!({"ok": false, "error": e.to_string()})),
+    // 在独立任务里执行：浏览器或反代超时断开会取消请求，不能让更新停在半途
+    let db = state.db.clone();
+    match tokio::spawn(async move { crate::version::perform_update(&db).await }).await {
+        Ok(Ok(msg)) => Json(json!({"ok": true, "message": msg})),
+        Ok(Err(e)) => Json(json!({"ok": false, "error": e.to_string()})),
+        Err(e) => Json(json!({"ok": false, "error": format!("更新任务异常退出: {}", e)})),
     }
 }

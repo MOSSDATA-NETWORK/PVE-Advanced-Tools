@@ -1,0 +1,21 @@
+# PVE-Advanced-Tools Docker 部署（镜像随 GitHub Release 发布，见 README「Docker」一节）
+#   docker load -i pve-advanced-tools-docker-linux-x86_64.tar.gz
+#   docker compose up -d
+# 数据（数据库、master.key、known_hosts）保存在数据卷 pve-advanced-tools-data 中，备份时连同 master.key 一起备份。
+services:
+  pve-advanced-tools:
+    image: pve-advanced-tools:latest
+    restart: unless-stopped
+    init: true # 让 docker stop 立即生效（程序作为 1 号进程不会自行处理 SIGTERM）
+    ports:
+      - "3210:3210"
+    volumes:
+      - pve-advanced-tools-data:/data
+    # environment:
+    #   BEHIND_TLS_PROXY: "1"                 # 经 HTTPS 反向代理访问时设置（Passkey 需要 HTTPS 域名）
+    #   RP_ORIGIN: https://pve.example.com    # 可选：固定 Passkey 使用的面板地址
+    #   MASTER_KEY: <64 位 hex>               # 可选：不设置则首次启动生成并保存到数据卷的 master.key
+
+volumes:
+  pve-advanced-tools-data:
+    name: pve-advanced-tools-data # 固定卷名：与 README 里 docker run 的写法共用同一份数据

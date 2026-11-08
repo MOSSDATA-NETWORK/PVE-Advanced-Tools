@@ -2,7 +2,8 @@ name: CI
 
 # Every push runs CI (frontend build + backend tests).
 # A push to the default branch that raises the version in backend/Cargo.toml to a new X.Y.Z
-# (no tag v<version> yet) also builds the Linux x86_64 binary and publishes the GitHub Release v<version>.
+# (no tag v<version> yet) also builds the Linux x86_64 binary (on Debian 12, web UI built in) and the
+# Docker image, and publishes them with a SHA256SUMS file as the GitHub Release v<version>.
 # Until the first release exists, any push to the default branch publishes its X.Y.Z version.
 # Any other push runs CI only.
 on:
@@ -93,16 +94,45 @@ jobs:
     needs: [frontend, backend, version]
     if: needs.version.outputs.publish == 'true'
     runs-on: ubuntu-latest
+    # Built on Debian 12 (glibc 2.36) so the binary runs on Debian 12 and newer;
+    # a binary built on the ubuntu-latest image needs a newer glibc and does not start there.
+    container: rust:1-bookworm
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          toolchain: stable
-          targets: x86_64-unknown-linux-gnu
+          node-version: 22
+      - name: Build web UI (built into the binary)
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
       - name: Build
         working-directory: backend
         run: cargo build --release --locked --target x86_64-unknown-linux-gnu
+      - name: Smoke test on Debian 12
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          bin=backend/target/x86_64-unknown-linux-gnu/release/pve-advanced-tools-backend
+          tmp=$(mktemp -d)
+          HOST=127.0.0.1 PORT=3299 DATABASE_URL="sqlite:$tmp/smoke.db?mode=rwc" DATA_DIR="$tmp/data" \
+            MASTER_KEY=$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n') "$bin" > "$tmp/log" 2>&1 &
+          pid=$!
+          up=
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3299/api/version > "$tmp/version.json" 2>/dev/null; then up=1; break; fi
+            sleep 1
+          done
+          [ -n "$up" ] && curl -fsS http://127.0.0.1:3299/ > "$tmp/index.html" || true
+          kill "$pid" 2>/dev/null || true
+          if [ -z "$up" ] || ! grep -q "\"version\":\"$VERSION\"" "$tmp/version.json" || ! grep -q '<div id="app">' "$tmp/index.html"; then
+            echo "::error::The built binary did not start and serve version $VERSION with its web UI on Debian 12"
+            cat "$tmp/log"
+            exit 1
+          fi
+          echo "Debian $(cat /etc/debian_version): $(cat "$tmp/version.json"), web UI served"
       - name: Rename
         run: cp backend/target/x86_64-unknown-linux-gnu/release/pve-advanced-tools-backend pve-advanced-tools-linux-x86_64
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -142,31 +172,31 @@ jobs:
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: artifacts
-      - name: Stage binaries and SHA256SUMS
+      - name: Stage binary
         run: |
           mkdir -p out
           cp artifacts/pve-advanced-tools-linux-x86_64/pve-advanced-tools-linux-x86_64 out/
-          cd out && sha256sum pve-advanced-tools-* > SHA256SUMS
-      # 可选 ed25519 签名：仓库 Secrets 配置 UPDATE_SIGN_KEY（hex 私钥）后，发布自动附 .sig；
-      # 平台端配置对应公钥 UPDATE_SIGN_PUBKEY 后即强制验签（未配置则拒绝在线更新，失败关闭）。
-      # 私钥经 env 传入（不做脚本插值），仅在 secret 非空时执行。
-      - name: Sign binaries (optional)
+      # The Docker image is published as a release file (docker load), built from the same Debian 12 binary.
+      - name: Build and smoke-test the Docker image
         env:
-          UPDATE_SIGN_KEY: ${{ secrets.UPDATE_SIGN_KEY }}
+          VERSION: ${{ needs.version.outputs.version }}
         run: |
-          if [ -z "$UPDATE_SIGN_KEY" ]; then echo "未配置签名私钥，跳过"; exit 0; fi
-          cd out
-          # Ubuntu 24.04 runners mark the system Python as externally managed (PEP 668)
-          python3 -m pip install --quiet --user --break-system-packages pynacl
-          UPDATE_SIGN_KEY="$UPDATE_SIGN_KEY" python3 - <<'PYEOF'
-          import glob, os
-          from nacl.signing import SigningKey
-          key = SigningKey(bytes.fromhex(os.environ["UPDATE_SIGN_KEY"].strip()))
-          for f in glob.glob("pve-advanced-tools-*"):
-              sig = key.sign(open(f, "rb").read()).signature
-              open(f + ".sig", "wb").write(sig)
-              print("signed", f)
-          PYEOF
+          # the default shell has no pipefail: a failed docker save would still publish a truncated archive
+          set -o pipefail
+          cp out/pve-advanced-tools-linux-x86_64 .
+          docker build -f deploy/docker/Dockerfile -t "pve-advanced-tools:$VERSION" -t pve-advanced-tools:latest .
+          docker run -d --name smoke -p 127.0.0.1:3299:3210 "pve-advanced-tools:$VERSION"
+          for _ in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:3299/api/version > version.json 2>/dev/null && break
+            sleep 1
+          done
+          docker logs smoke
+          docker rm -f smoke
+          grep -q "\"version\":\"$VERSION\"" version.json || { echo "::error::The Docker image did not start and serve version $VERSION"; exit 1; }
+          docker save "pve-advanced-tools:$VERSION" pve-advanced-tools:latest | gzip -9 > out/pve-advanced-tools-docker-linux-x86_64.tar.gz
+      # Panels check the downloaded binary against this file before updating (no separate signing key)
+      - name: SHA256SUMS
+        run: cd out && sha256sum pve-advanced-tools-* > SHA256SUMS
       - name: Publish release
         uses: softprops/action-gh-release@26994186c0ac3ef5cae75ac16aa32e8153525f77 # v1
         with:

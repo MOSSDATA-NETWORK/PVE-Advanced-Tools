@@ -42,17 +42,19 @@ echo "2. 复制文件..."
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 if [ -f "$SCRIPT_DIR/target/release/pve-advanced-tools-backend" ]; then
-    cp "$SCRIPT_DIR/target/release/pve-advanced-tools-backend" "$INSTALL_DIR/$BINARY_NAME"
+    SRC="$SCRIPT_DIR/target/release/pve-advanced-tools-backend"
 elif [ -f "$SCRIPT_DIR/backend/target/release/pve-advanced-tools-backend" ]; then
-    cp "$SCRIPT_DIR/backend/target/release/pve-advanced-tools-backend" "$INSTALL_DIR/$BINARY_NAME"
+    SRC="$SCRIPT_DIR/backend/target/release/pve-advanced-tools-backend"
 elif [ -f "$SCRIPT_DIR/$BINARY_NAME" ]; then
-    cp "$SCRIPT_DIR/$BINARY_NAME" "$INSTALL_DIR/$BINARY_NAME"
+    SRC="$SCRIPT_DIR/$BINARY_NAME"
 else
     echo "❌ 未找到二进制文件"
     echo "   请先构建（backend 目录 cargo build --release）或将 pve-advanced-tools 放在脚本同级目录"
     exit 1
 fi
-chmod +x "$INSTALL_DIR/$BINARY_NAME"
+# 先写临时文件再改名替换：重装时直接覆盖正在运行的程序会报 Text file busy
+install -m 755 "$SRC" "$INSTALL_DIR/$BINARY_NAME.new"
+mv -f "$INSTALL_DIR/$BINARY_NAME.new" "$INSTALL_DIR/$BINARY_NAME"
 
 # 复制静态文件
 if [ -d "$SCRIPT_DIR/backend/static" ]; then
@@ -62,7 +64,7 @@ elif [ -d "$SCRIPT_DIR/static" ]; then
     cp -r "$SCRIPT_DIR/static" "$INSTALL_DIR/static"
     echo "   ✅ 前端静态文件已复制"
 else
-    echo "⚠️  未找到 static 目录，API 可用但前端页面不可用"
+    echo "   未找到 static 目录：发布版程序已内置页面（自行构建时须先在 frontend 目录执行 npm run build）"
 fi
 
 # 复制迁移文件
@@ -132,7 +134,8 @@ systemctl daemon-reload
 systemctl enable "$SERVICE_NAME"
 
 echo "6. 启动服务..."
-systemctl start "$SERVICE_NAME"
+# restart：重装时把正在运行的旧进程换成新程序；服务未运行时等同 start
+systemctl restart "$SERVICE_NAME"
 
 # 等待启动
 sleep 2

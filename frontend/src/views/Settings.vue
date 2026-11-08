@@ -41,6 +41,7 @@ const notifyType = ref('telegram')
 // Version
 const currentVersion = ref('')
 const updateInfo = ref<any>(null)
+const checkError = ref('')
 const checkingUpdate = ref(false)
 const updating = ref(false)
 const changelog = ref<any[]>([])
@@ -85,11 +86,18 @@ async function loadVersion() {
 
 async function checkUpdate() {
   checkingUpdate.value = true
+  checkError.value = ''
   try {
     const res = await versionApi.check()
     if (res.ok) {
       updateInfo.value = res.data
+    } else {
+      updateInfo.value = null
+      checkError.value = res.error || '检查更新失败'
     }
+  } catch (e: any) {
+    updateInfo.value = null
+    checkError.value = e.response?.data?.error || '检查更新失败：无法连接面板'
   } finally {
     checkingUpdate.value = false
   }
@@ -123,7 +131,12 @@ async function doUpdate() {
       updateResult.value = res.error || '更新失败'
     }
   } catch (e: any) {
-    updateResult.value = e.response?.data?.error || '更新失败'
+    // 反代或网络在下载完成前断开时，更新仍在服务端继续，完成后服务会自动重启
+    if (!e.response || [502, 503, 504, 524].includes(e.response.status)) {
+      updateResult.value = '连接中断或超时：更新可能仍在进行，请约一分钟后刷新页面查看版本号'
+    } else {
+      updateResult.value = e.response?.data?.error || '更新失败'
+    }
   } finally {
     updating.value = false
   }
@@ -475,6 +488,9 @@ async function deletePasskey() {
           </div>
           <div v-else-if="updateInfo && !updateInfo.update_available" style="margin-top: 8px; color: var(--green); font-size: 14px;">
             ✅ 当前已是最新版本
+          </div>
+          <div v-else-if="checkError" role="alert" style="margin-top: 8px; color: var(--red); font-size: 14px;">
+            {{ checkError }}
           </div>
         </div>
         <div style="display: flex; gap: 12px;">
