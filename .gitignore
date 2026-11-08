@@ -21,5 +21,6 @@ data/
 # 工具与缓存
 .claude/
 .codegraph/
+.serena/
 __pycache__/
 *.pyc
