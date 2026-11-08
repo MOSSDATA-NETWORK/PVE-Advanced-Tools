@@ -2,7 +2,7 @@ name: CI
 
 # Every push runs CI (frontend build + backend tests).
 # A push to the default branch that raises the version in backend/Cargo.toml to a new X.Y.Z
-# (no tag v<version> yet) also builds the binaries and publishes the GitHub Release v<version>.
+# (no tag v<version> yet) also builds the Linux x86_64 binary and publishes the GitHub Release v<version>.
 # Until the first release exists, any push to the default branch publishes its X.Y.Z version.
 # Any other push runs CI only.
 on:
@@ -110,52 +110,8 @@ jobs:
           name: pve-advanced-tools-linux-x86_64
           path: pve-advanced-tools-linux-x86_64
 
-  build-linux-aarch64:
-    needs: [frontend, backend, version]
-    if: needs.version.outputs.publish == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
-        with:
-          toolchain: stable
-          targets: aarch64-unknown-linux-gnu
-      - name: Install cross
-        run: cargo install cross --git https://github.com/cross-rs/cross
-      - name: Build
-        working-directory: backend
-        run: cross build --release --locked --target aarch64-unknown-linux-gnu
-      - name: Rename
-        run: cp backend/target/aarch64-unknown-linux-gnu/release/pve-advanced-tools-backend pve-advanced-tools-linux-aarch64
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: pve-advanced-tools-linux-aarch64
-          path: pve-advanced-tools-linux-aarch64
-
-  build-macos:
-    needs: [frontend, backend, version]
-    if: needs.version.outputs.publish == 'true'
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
-        with:
-          toolchain: stable
-          targets: aarch64-apple-darwin
-      - name: Build
-        working-directory: backend
-        run: cargo build --release --locked --target aarch64-apple-darwin
-      - name: Rename
-        run: cp backend/target/aarch64-apple-darwin/release/pve-advanced-tools-backend pve-advanced-tools-macos-aarch64
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: pve-advanced-tools-macos-aarch64
-          path: pve-advanced-tools-macos-aarch64
-
   release:
-    needs: [version, build-linux-x86_64, build-linux-aarch64, build-macos]
+    needs: [version, build-linux-x86_64]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -190,8 +146,6 @@ jobs:
         run: |
           mkdir -p out
           cp artifacts/pve-advanced-tools-linux-x86_64/pve-advanced-tools-linux-x86_64 out/
-          cp artifacts/pve-advanced-tools-linux-aarch64/pve-advanced-tools-linux-aarch64 out/
-          cp artifacts/pve-advanced-tools-macos-aarch64/pve-advanced-tools-macos-aarch64 out/
           cd out && sha256sum pve-advanced-tools-* > SHA256SUMS
       # 可选 ed25519 签名：仓库 Secrets 配置 UPDATE_SIGN_KEY（hex 私钥）后，发布自动附 .sig；
       # 平台端配置对应公钥 UPDATE_SIGN_PUBKEY 后即强制验签（未配置则拒绝在线更新，失败关闭）。
