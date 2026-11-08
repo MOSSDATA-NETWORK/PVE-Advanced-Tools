@@ -1,0 +1,223 @@
+name: CI
+
+# Every push runs CI (frontend build + backend tests).
+# A push to the default branch that raises the version in backend/Cargo.toml to a new X.Y.Z
+# (no tag v<version> yet) also builds the binaries and publishes the GitHub Release v<version>.
+# Until the first release exists, any push to the default branch publishes its X.Y.Z version.
+# Any other push runs CI only.
+on:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          toolchain: stable
+      - name: Test
+        working-directory: backend
+        run: cargo test --locked
+
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.check.outputs.publish }}
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Detect version bump
+        id: check
+        env:
+          BEFORE: ${{ github.event.before }}
+          DEFAULT_REF: refs/heads/${{ github.event.repository.default_branch }}
+        run: |
+          ver() { python3 -c 'import sys, tomllib; print(tomllib.loads(sys.stdin.read())["package"]["version"])'; }
+          new=$(ver < backend/Cargo.toml)
+          echo "version=$new" >> "$GITHUB_OUTPUT"
+          publish=false
+          if [ "$GITHUB_REF" != "$DEFAULT_REF" ]; then
+            echo "Not the default branch: CI only"
+          elif ! [[ "$new" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Version $new is not X.Y.Z: CI only"
+          elif ! tags=$(git ls-remote --tags --refs origin 'v*'); then
+            # fail loudly: silently skipping here could lose the first release
+            echo "::error::Could not list the release tags"
+            exit 1
+          elif [ -z "$tags" ]; then
+            # nothing released yet: publish the current version (a later push retries a failed first release)
+            echo "No release yet: publishing v$new"
+            publish=true
+          elif [[ "$BEFORE" =~ ^0*$ ]]; then
+            echo "New branch, no previous commit: CI only"
+          elif ! git fetch --quiet --no-tags --depth=1 origin "$BEFORE"; then
+            # fail loudly: silently skipping here would lose this bump's release for good
+            echo "::error::Could not fetch the previous commit $BEFORE"
+            exit 1
+          elif ! old=$(git show "$BEFORE:backend/Cargo.toml" | ver); then
+            echo "No version at the previous commit: CI only"
+          else
+            old_core=${old%%[-+]*}
+            # raised = a higher X.Y.Z, or the same X.Y.Z promoted from a pre-release (sort -V puts 0.2.0 before 0.2.0-rc.1);
+            # dropping only +build metadata is not a bump
+            if { [ "$new" = "$old_core" ] && [[ "$old" == "$old_core"-* ]]; } ||
+               { [ "$new" != "$old_core" ] && [ "$(printf '%s\n%s\n' "$old_core" "$new" | sort -V | tail -n1)" = "$new" ]; }; then
+              echo "Version raised $old -> $new: publishing v$new"
+              publish=true
+            else
+              echo "Version not raised ($old -> $new): CI only"
+            fi
+          fi
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+
+  build-linux-x86_64:
+    needs: [frontend, backend, version]
+    if: needs.version.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          toolchain: stable
+          targets: x86_64-unknown-linux-gnu
+      - name: Build
+        working-directory: backend
+        run: cargo build --release --locked --target x86_64-unknown-linux-gnu
+      - name: Rename
+        run: cp backend/target/x86_64-unknown-linux-gnu/release/pve-advanced-tools-backend pve-advanced-tools-linux-x86_64
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pve-advanced-tools-linux-x86_64
+          path: pve-advanced-tools-linux-x86_64
+
+  build-linux-aarch64:
+    needs: [frontend, backend, version]
+    if: needs.version.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          toolchain: stable
+          targets: aarch64-unknown-linux-gnu
+      - name: Install cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+      - name: Build
+        working-directory: backend
+        run: cross build --release --locked --target aarch64-unknown-linux-gnu
+      - name: Rename
+        run: cp backend/target/aarch64-unknown-linux-gnu/release/pve-advanced-tools-backend pve-advanced-tools-linux-aarch64
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pve-advanced-tools-linux-aarch64
+          path: pve-advanced-tools-linux-aarch64
+
+  build-macos:
+    needs: [frontend, backend, version]
+    if: needs.version.outputs.publish == 'true'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          toolchain: stable
+          targets: aarch64-apple-darwin
+      - name: Build
+        working-directory: backend
+        run: cargo build --release --locked --target aarch64-apple-darwin
+      - name: Rename
+        run: cp backend/target/aarch64-apple-darwin/release/pve-advanced-tools-backend pve-advanced-tools-macos-aarch64
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pve-advanced-tools-macos-aarch64
+          path: pve-advanced-tools-macos-aarch64
+
+  release:
+    needs: [version, build-linux-x86_64, build-linux-aarch64, build-macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    # one publisher per version at a time, so the tag check below cannot race
+    concurrency:
+      group: release-v${{ needs.version.outputs.version }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      # A new tag is created at this commit; a tag already at this commit is a retry (assets are re-uploaded);
+      # a tag at another commit means this version was already released from different code: fail.
+      - name: Check tag ownership
+        env:
+          TAG: v${{ needs.version.outputs.version }}
+        run: |
+          refs=$(git ls-remote --tags origin "refs/tags/$TAG" "refs/tags/$TAG^{}")
+          # annotated tags list the tag object plus the commit as <tag>^{}; lightweight tags list only the commit
+          commit=$(printf '%s\n' "$refs" | awk '{c=$1} $2 ~ /\^\{\}$/ {p=$1} END {print (p != "" ? p : c)}')
+          if [ -z "$refs" ]; then
+            echo "Tag $TAG is new"
+          elif [ "$commit" = "$GITHUB_SHA" ]; then
+            echo "Tag $TAG already points to this commit: updating the release"
+          else
+            echo "::error::$TAG already exists at $commit, not at this run's commit $GITHUB_SHA"
+            exit 1
+          fi
+      - name: Download all artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: artifacts
+      - name: Stage binaries and SHA256SUMS
+        run: |
+          mkdir -p out
+          cp artifacts/pve-advanced-tools-linux-x86_64/pve-advanced-tools-linux-x86_64 out/
+          cp artifacts/pve-advanced-tools-linux-aarch64/pve-advanced-tools-linux-aarch64 out/
+          cp artifacts/pve-advanced-tools-macos-aarch64/pve-advanced-tools-macos-aarch64 out/
+          cd out && sha256sum pve-advanced-tools-* > SHA256SUMS
+      # 可选 ed25519 签名：仓库 Secrets 配置 UPDATE_SIGN_KEY（hex 私钥）后，发布自动附 .sig；
+      # 平台端配置对应公钥 UPDATE_SIGN_PUBKEY 后即强制验签（未配置则拒绝在线更新，失败关闭）。
+      # 私钥经 env 传入（不做脚本插值），仅在 secret 非空时执行。
+      - name: Sign binaries (optional)
+        env:
+          UPDATE_SIGN_KEY: ${{ secrets.UPDATE_SIGN_KEY }}
+        run: |
+          if [ -z "$UPDATE_SIGN_KEY" ]; then echo "未配置签名私钥，跳过"; exit 0; fi
+          cd out
+          # Ubuntu 24.04 runners mark the system Python as externally managed (PEP 668)
+          python3 -m pip install --quiet --user --break-system-packages pynacl
+          UPDATE_SIGN_KEY="$UPDATE_SIGN_KEY" python3 - <<'PYEOF'
+          import glob, os
+          from nacl.signing import SigningKey
+          key = SigningKey(bytes.fromhex(os.environ["UPDATE_SIGN_KEY"].strip()))
+          for f in glob.glob("pve-advanced-tools-*"):
+              sig = key.sign(open(f, "rb").read()).signature
+              open(f + ".sig", "wb").write(sig)
+              print("signed", f)
+          PYEOF
+      - name: Publish release
+        uses: softprops/action-gh-release@26994186c0ac3ef5cae75ac16aa32e8153525f77 # v1
+        with:
+          tag_name: v${{ needs.version.outputs.version }}
+          name: v${{ needs.version.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          generate_release_notes: true
+          files: out/*
